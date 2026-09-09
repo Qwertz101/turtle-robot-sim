@@ -1363,7 +1363,7 @@ function SimulatorWorkspace() {
 
       let n = 0, prev = null, on = false;
       return {
-        /* Turning a layer on CLEARS it. Accumulating across an off period
+          /* Turning a layer on CLEARS it. Accumulating across an off period
            would splice two disconnected arcs into one stroke and invent a
            segment the tip never travelled. */
         enable(v) {
@@ -1415,6 +1415,19 @@ function SimulatorWorkspace() {
     }
 
     const tracks = { tip: makeTrack(1.9), mid: makeTrack(1.0) };
+    /* Seed each track's on/off state from the store HERE, synchronously at
+       creation, rather than leaving it to the sibling `enable` effects below.
+       Those effects only fire when layers.tipTrack/midTrack CHANGE, so on a
+       theme switch -- where this whole scene remounts but the layer flags do
+       not change -- they can race this effect (which always constructs a
+       fresh track defaulting to off) and lose, since dev-mode double-invoke
+       can rerun this scene-setup a second time AFTER the sibling effect has
+       already applied the correct state, silently overwriting it back to
+       off. P.current.layers is populated synchronously at ref creation
+       (before any effect runs), so reading it here is race-free regardless
+       of how many times this effect fires or in what order. */
+    tracks.tip.enable(P.current.layers.tipTrack);
+    tracks.mid.enable(P.current.layers.midTrack);
 
     const frameR = () => Math.max(240, ((P.current.Lc + P.current.Lext) * 1000) * 2.0);
     const cam = { r: frameR(), phi: Math.PI / 2.35, ang: 0.9, tx: 0, ty: 0 };
