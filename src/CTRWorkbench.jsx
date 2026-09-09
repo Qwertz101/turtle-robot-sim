@@ -926,12 +926,19 @@ function useDesignStore() {
   const [hydro, setHydro] = useState({ finW: 8, Cd: 1.3, rho: 997, nFins: 2, area: 20, bodyCd: 0.8 });
   // Sweep domain for the optimiser: the box it searches, not the design itself.
   const [domain, setDomain] = useState({ logLife: 10, LcMaxMm: 150, LcLimitMm: 150, etaK: 0.05, clip: true });
+  // Data-layer visibility on the 3-D view. This belongs in the shared store,
+  // not local state on SimulatorWorkspace: the root remounts every workspace
+  // on a theme switch (key={`${tab}${ready}`}, so the canvases and WebGL
+  // scenes repaint), and local state does not survive its component
+  // unmounting — a theme toggle was silently switching every layer back off.
+  const [layers, setLayers] = useState({ tipTrack: false, midTrack: false, vectors: true });
   const [handoff, setHandoff] = useState(null);
 
   const patchSim = useCallback((p) => setSim((s) => ({ ...s, ...p })), []);
   const patchMotor = useCallback((p) => setMotor((s) => ({ ...s, ...p })), []);
   const patchHydro = useCallback((p) => setHydro((s) => ({ ...s, ...p })), []);
   const patchDomain = useCallback((p) => setDomain((s) => ({ ...s, ...p })), []);
+  const patchLayers = useCallback((p) => setLayers((s) => ({ ...s, ...p })), []);
 
   const applyDesign = useCallback((d) => {
     // The sweep is the equal-precurvature diagonal, so a design lands in the
@@ -942,7 +949,7 @@ function useDesignStore() {
   }, []);
 
   return { sim, patchSim, motor, patchMotor, hydro, patchHydro,
-    domain, patchDomain, handoff, applyDesign };
+    domain, patchDomain, layers, patchLayers, handoff, applyDesign };
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1078,7 +1085,7 @@ function usePanels(initial) {
    7 · WORKSPACE A — INTERACTIVE 3D SIMULATOR
    ═══════════════════════════════════════════════════════════════ */
 function SimulatorWorkspace() {
-  const { sim, patchSim, handoff } = useDesign();
+  const { sim, patchSim, handoff, layers, patchLayers } = useDesign();
   const { alphaDeg, LcMm, extMm, k1, k2 } = sim;
   const lambda = bifurcation(k1, k2, LcMm / 1000);
   const [sweeping, setSweeping] = useState(false);
@@ -1094,8 +1101,7 @@ function SimulatorWorkspace() {
      point a distally-mounted flap would pivot about. Both are legitimate
      design references and both can be lit at once, which is the direct way to
      see which one your design actually cares about. */
-  const [layers, setLayers] = useState({ tipTrack: false, midTrack: false, vectors: true });
-  const setLayer = useCallback((k, v) => setLayers((L) => ({ ...L, [k]: v })), []);
+  const setLayer = useCallback((k, v) => patchLayers({ [k]: v }), [patchLayers]);
   const [layersOpen, setLayersOpen] = useState(false);
   const [side, setSide] = useState(true);
   const [panels, togglePanel] = usePanels({ energy: true, scurve: true });
@@ -2618,8 +2624,12 @@ function OptimizerWorkspace() {
             unit=" m⁻¹" accent={C.blue} onChange={(v) => patchSim({ k1: v })} />
           <Slider label="Inner precurvature" symbol="κ₂" value={k2} min={0} max={25} step={0.1}
             unit=" m⁻¹" accent={C.gold} onChange={(v) => patchSim({ k2: v })} />
+          {/* Bounded by the Sweep domain's overlap ceiling (LcLimitMm) below,
+              not by the current value alone -- raising that ceiling must
+              widen this slider's range too, or the two controls silently
+              disagree about how long an overlap the app allows. */}
           <Slider label="Overlap length" symbol="L_c" value={LcMm} min={10}
-            max={Math.max(150, Math.ceil(LcMm / 10) * 10)} step={1}
+            max={Math.max(150, LcLimitMm, Math.ceil(LcMm / 10) * 10)} step={1}
             unit=" mm" digits={0} accent={C.blue} onChange={(v) => patchSim({ LcMm: v })} />
           <Slider label="Fin extension" symbol="L_ext" value={extMm} min={0} max={120} step={1}
             unit=" mm" digits={0} accent={C.accent} onChange={(v) => patchSim({ extMm: v })} />
