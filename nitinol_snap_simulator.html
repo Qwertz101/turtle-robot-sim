@@ -1,0 +1,1282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nitinol Snap-Fin Propulsion Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0C1117;
+    --bg-grad:#0A1A1F;
+    --panel:#141B24;
+    --panel-alt:#1A2330;
+    --panel-raised:#1F2A38;
+    --border:#263242;
+    --border-soft:#1D2836;
+    --text:#E7EDF4;
+    --text-dim:#8E9DB0;
+    --text-faint:#5C6B80;
+    --metal:#CBA968;
+    --metal-dim:#8A7647;
+    --water:#4CB6D9;
+    --water-dim:#2E7285;
+    --energy:#FF6E4C;
+    --energy-dim:#B04A32;
+    --good:#5FC493;
+    --warn:#E8B94D;
+    --bad:#E8615F;
+    --radius:10px;
+    --radius-sm:6px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(ellipse 1200px 600px at 15% -10%, rgba(76,182,217,0.08), transparent 60%),
+      radial-gradient(ellipse 1000px 700px at 100% 10%, rgba(203,169,104,0.06), transparent 55%),
+      var(--bg);
+    color:var(--text);
+    font-family:'IBM Plex Sans', sans-serif;
+    font-size:14px;
+    line-height:1.5;
+    min-height:100vh;
+  }
+  ::selection{ background:var(--metal); color:#141B24; }
+  h1,h2,h3,h4{ font-family:'Space Grotesk', sans-serif; margin:0; letter-spacing:-0.01em; }
+  .mono{ font-family:'IBM Plex Mono', monospace; }
+  a{ color:var(--water); }
+
+  /* ---------- Header ---------- */
+  .app-header{
+    padding:22px 28px 18px;
+    border-bottom:1px solid var(--border-soft);
+    display:flex; align-items:flex-start; justify-content:space-between; gap:24px;
+    flex-wrap:wrap;
+  }
+  .app-header .title-block{ display:flex; align-items:center; gap:14px; }
+  .app-header .mark{
+    width:38px;height:38px; flex:none; border-radius:9px;
+    background:linear-gradient(135deg, var(--metal), var(--metal-dim));
+    display:flex; align-items:center; justify-content:center;
+  }
+  .app-header h1{ font-size:19px; font-weight:600; color:var(--text); }
+  .app-header .sub{ color:var(--text-dim); font-size:12.5px; margin-top:3px; max-width:640px; }
+  .status-badge{
+    display:inline-flex; align-items:center; gap:7px;
+    padding:7px 13px; border-radius:99px; font-size:12px; font-weight:500;
+    border:1px solid var(--border); background:var(--panel);
+    white-space:nowrap;
+  }
+  .status-badge .dot{ width:7px; height:7px; border-radius:50%; }
+  .status-good{ border-color:rgba(95,196,147,0.4); color:var(--good); }
+  .status-good .dot{ background:var(--good); box-shadow:0 0 8px var(--good); }
+  .status-bad{ border-color:rgba(232,97,95,0.4); color:var(--bad); }
+  .status-bad .dot{ background:var(--bad); }
+
+  /* ---------- Layout ---------- */
+  .app-grid{
+    display:grid;
+    grid-template-columns: 348px 1fr;
+    gap:0;
+    align-items:start;
+  }
+  .controls{
+    border-right:1px solid var(--border-soft);
+    height:calc(100vh - 84px);
+    position:sticky; top:0;
+    overflow-y:auto;
+    padding:16px 16px 60px;
+  }
+  .controls::-webkit-scrollbar{ width:8px; }
+  .controls::-webkit-scrollbar-thumb{ background:var(--panel-raised); border-radius:8px; }
+  .main{ padding:20px 26px 60px; min-width:0; }
+
+  @media (max-width: 980px){
+    .app-grid{ grid-template-columns: 1fr; }
+    .controls{ height:auto; position:relative; border-right:none; border-bottom:1px solid var(--border-soft); }
+  }
+
+  /* ---------- Control groups ---------- */
+  .group{
+    border:1px solid var(--border-soft);
+    border-radius:var(--radius);
+    margin-bottom:10px;
+    overflow:hidden;
+    background:var(--panel);
+  }
+  .group-head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:11px 13px; cursor:pointer; user-select:none;
+    font-weight:500; font-size:12.5px; letter-spacing:0.02em; text-transform:uppercase;
+    color:var(--text-dim);
+  }
+  .group-head:hover{ color:var(--text); }
+  .group-head .chev{ transition:transform 0.18s ease; color:var(--text-faint); font-size:11px; }
+  .group.open .group-head .chev{ transform:rotate(90deg); }
+  .group-head .swatch{ width:8px; height:8px; border-radius:2px; margin-right:8px; display:inline-block; }
+  .group-body{ padding:2px 13px 14px; display:none; }
+  .group.open .group-body{ display:block; }
+
+  .field{ margin:12px 0; }
+  .field-label{
+    display:flex; justify-content:space-between; align-items:baseline;
+    font-size:12px; color:var(--text-dim); margin-bottom:6px;
+  }
+  .field-label .val{ font-family:'IBM Plex Mono', monospace; color:var(--text); font-size:12px; }
+  .field-note{ font-size:11px; color:var(--text-faint); margin-top:5px; line-height:1.45; }
+  input[type=range]{
+    -webkit-appearance:none; width:100%; height:4px; border-radius:2px;
+    background:var(--border); outline:none; margin:4px 0;
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:14px; height:14px; border-radius:50%;
+    background:var(--metal); cursor:pointer; border:2px solid #0C1117;
+    box-shadow:0 0 0 1px var(--metal);
+  }
+  input[type=range]::-moz-range-thumb{
+    width:14px; height:14px; border-radius:50%; background:var(--metal);
+    cursor:pointer; border:2px solid #0C1117;
+  }
+  .row2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .seg{
+    display:flex; border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden;
+  }
+  .seg button{
+    flex:1; background:var(--panel-alt); color:var(--text-dim); border:none;
+    padding:7px 6px; font-size:11.5px; cursor:pointer; font-family:'IBM Plex Sans',sans-serif;
+    border-right:1px solid var(--border);
+  }
+  .seg button:last-child{ border-right:none; }
+  .seg button.active{ background:var(--panel-raised); color:var(--metal); font-weight:600; }
+
+  .callout{
+    background:var(--panel-alt); border:1px solid var(--border);
+    border-left:3px solid var(--water); border-radius:var(--radius-sm);
+    padding:10px 11px; font-size:11.5px; color:var(--text-dim); margin:10px 0; line-height:1.5;
+  }
+  .callout b{ color:var(--text); }
+  .callout.amber{ border-left-color:var(--warn); }
+
+  /* ---------- Main viz ---------- */
+  .card{
+    background:var(--panel); border:1px solid var(--border-soft); border-radius:var(--radius);
+    padding:18px 18px 14px; margin-bottom:16px;
+  }
+  .card-head{ display:flex; align-items:baseline; justify-content:space-between; margin-bottom:4px; flex-wrap:wrap; gap:8px; }
+  .card-head h2{ font-size:14.5px; font-weight:600; }
+  .card-head .desc{ font-size:12px; color:var(--text-dim); }
+  .card-sub{ font-size:12px; color:var(--text-dim); margin-bottom:14px; line-height:1.5; }
+
+  .hero-grid{ display:grid; grid-template-columns: 300px 1fr; gap:22px; }
+  @media (max-width:1180px){ .hero-grid{ grid-template-columns:1fr; } }
+
+  .schematic-wrap{ display:flex; flex-direction:column; align-items:center; gap:10px; }
+  .transport{ display:flex; gap:8px; align-items:center; width:100%; }
+  .btn{
+    background:var(--panel-raised); border:1px solid var(--border); color:var(--text);
+    border-radius:var(--radius-sm); padding:8px 14px; font-size:12.5px; cursor:pointer;
+    font-family:'IBM Plex Sans',sans-serif; font-weight:500; display:flex; align-items:center; gap:6px;
+  }
+  .btn:hover{ border-color:var(--metal); color:var(--metal); }
+  .btn.primary{ background:var(--metal); color:#141B24; border-color:var(--metal); }
+  .btn.primary:hover{ opacity:0.9; color:#141B24; }
+  .readouts{ display:grid; grid-template-columns:1fr 1fr; gap:8px; width:100%; }
+  .readout{
+    background:var(--panel-alt); border:1px solid var(--border-soft); border-radius:var(--radius-sm);
+    padding:8px 10px;
+  }
+  .readout .l{ font-size:10.5px; color:var(--text-faint); text-transform:uppercase; letter-spacing:0.03em; }
+  .readout .v{ font-family:'IBM Plex Mono',monospace; font-size:15px; margin-top:2px; }
+  .readout .v.metal{ color:var(--metal); }
+  .readout .v.water{ color:var(--water); }
+  .readout .v.energy{ color:var(--energy); }
+
+  .chart-box{ position:relative; height:230px; }
+  .chart-box.tall{ height:250px; }
+
+  .legend-row{ display:flex; gap:16px; font-size:11.5px; color:var(--text-dim); margin-top:6px; flex-wrap:wrap; }
+  .legend-row .li{ display:flex; align-items:center; gap:6px; }
+  .legend-row .sw{ width:14px; height:3px; border-radius:2px; display:inline-block; }
+  .legend-row .sw.dot{ width:8px; height:8px; border-radius:50%; }
+
+  /* energy budget */
+  .budget-grid{ display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; margin-bottom:14px; }
+  @media (max-width:900px){ .budget-grid{ grid-template-columns:repeat(2,1fr); } }
+  .budget-tile{
+    background:var(--panel-alt); border:1px solid var(--border-soft); border-radius:var(--radius-sm);
+    padding:12px 13px;
+  }
+  .budget-tile .l{ font-size:11px; color:var(--text-dim); }
+  .budget-tile .v{ font-family:'IBM Plex Mono',monospace; font-size:20px; margin-top:5px; color:var(--text); }
+  .budget-tile .u{ font-size:11px; color:var(--text-faint); margin-left:3px; }
+
+  .check-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:10px 12px; border-radius:var(--radius-sm); background:var(--panel-alt);
+    border:1px solid var(--border-soft); margin-bottom:8px; flex-wrap:wrap;
+  }
+  .check-row .label{ font-size:12.5px; color:var(--text); font-weight:500; }
+  .check-row .detail{ font-size:11.5px; color:var(--text-dim); }
+  .pill{ padding:4px 10px; border-radius:99px; font-size:11px; font-weight:600; white-space:nowrap; }
+  .pill.good{ background:rgba(95,196,147,0.15); color:var(--good); }
+  .pill.warn{ background:rgba(232,185,77,0.15); color:var(--warn); }
+  .pill.bad{ background:rgba(232,97,95,0.15); color:var(--bad); }
+
+  .strain-bar{ height:8px; border-radius:4px; background:var(--border); overflow:hidden; margin-top:8px; position:relative; }
+  .strain-bar .fill{ height:100%; border-radius:4px; transition:width .25s ease, background .25s ease; }
+  .strain-bar .marker{ position:absolute; top:-3px; width:2px; height:14px; background:var(--text-faint); }
+
+  footer{ padding:22px 28px 50px; color:var(--text-faint); font-size:11.5px; border-top:1px solid var(--border-soft); line-height:1.6; }
+
+  /* ---- tabs ---- */
+  .tabbar{ display:flex; gap:6px; margin-bottom:16px; border-bottom:1px solid var(--border-soft); padding-bottom:0; }
+  .tab{ appearance:none; background:transparent; border:none; border-bottom:2px solid transparent;
+        color:var(--text-dim); font-family:inherit; font-size:13px; font-weight:600; letter-spacing:.01em;
+        padding:9px 15px; cursor:pointer; transition:color .15s, border-color .15s; margin-bottom:-1px; }
+  .tab:hover{ color:var(--text); }
+  .tab.active{ color:var(--energy); border-bottom-color:var(--energy); }
+
+  /* ---- energy landscape ---- */
+  .lscape-grid{ display:grid; grid-template-columns:250px 1fr; gap:20px; align-items:start; }
+  @media (max-width:900px){ .lscape-grid{ grid-template-columns:1fr; } }
+  .lscape-controls{ display:flex; flex-direction:column; gap:14px; }
+  .lscape-plots{ display:flex; flex-direction:column; gap:16px; min-width:0; }
+  .plot-box{ background:var(--bg); border:1px solid var(--border-soft); border-radius:10px; padding:12px 14px 14px; }
+  .plot-title{ font-size:11.5px; font-weight:600; color:var(--text-dim); letter-spacing:.02em; margin-bottom:8px; }
+  .plot-note{ font-size:11px; color:var(--text-faint); line-height:1.55; margin-top:9px; }
+  footer a{ color:var(--text-dim); }
+
+  .snap-flash{ animation:flash 0.5s ease-out; }
+  @keyframes flash{ 0%{ opacity:1; } 100%{ opacity:0; } }
+
+  .tabs{ display:flex; gap:6px; margin-bottom:2px; }
+  .tabs button{
+    background:none; border:none; color:var(--text-faint); font-size:11.5px; padding:5px 0;
+    cursor:pointer; font-family:'IBM Plex Sans',sans-serif; border-bottom:2px solid transparent;
+  }
+  .tabs button.active{ color:var(--text); border-bottom-color:var(--metal); }
+</style>
+</head>
+<body>
+
+<div class="app-header">
+  <div class="title-block">
+    <div class="mark">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 12c0-4.4 3.6-8 8-8M20 12c0 4.4-3.6 8-8 8" stroke="#141B24" stroke-width="2.4" stroke-linecap="round"/><circle cx="4" cy="12" r="1.6" fill="#141B24"/><circle cx="20" cy="12" r="1.6" fill="#141B24"/></svg>
+    </div>
+    <div>
+      <h1>Snap-Fin Propulsion Simulator</h1>
+      <div class="sub">Continuous motor rotation &rarr; elastic snap-through of a pre-curved Nitinol tube &rarr; intermittent thrust. Adjust the hardware on the left; every plot below recomputes live.</div>
+    </div>
+  </div>
+  <div id="statusBadge" class="status-badge status-good"><span class="dot"></span><span id="statusText">Snap-capable</span></div>
+</div>
+
+<div class="app-grid">
+
+  <!-- ============= CONTROLS ============= -->
+  <div class="controls" id="controls">
+
+    <div class="group open" data-group="fin">
+      <div class="group-head" onclick="toggleGroup('fin')"><span><span class="swatch" style="background:var(--metal)"></span>Nitinol fin tube</span><span class="chev">&#9656;</span></div>
+      <div class="group-body">
+        <div class="field">
+          <div class="field-label"><span>Outer diameter (OD&#8321;)</span><span class="val" id="v_OD1">1.47 mm</span></div>
+          <input type="range" id="OD1" min="0.5" max="3.0" step="0.01" value="1.47">
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Inner diameter (ID&#8321;)</span><span class="val" id="v_ID1">1.28 mm</span></div>
+          <input type="range" id="ID1" min="0.2" max="2.8" step="0.01" value="1.28">
+          <div class="field-note" id="note_wall1">Wall thickness: 0.10 mm</div>
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Precurvature &kappa;&#8321;</span><span class="val" id="v_kappa1">24.0 /m</span></div>
+          <input type="range" id="kappa1" min="1" max="60" step="0.5" value="24">
+          <div class="field-note" id="note_R1">Radius of curvature: 41.7 mm</div>
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Curved overlap length (L<sub>c</sub>)</span><span class="val" id="v_Lc">60 mm</span></div>
+          <input type="range" id="Lc" min="15" max="150" step="1" value="60">
+          <div class="field-note"><b>This is the overlap.</b> Length over which both tubes are concentric <i>and both precurved</i> &mdash; the only region where they fight each other, so it is the only region that can produce a snap. Any tube sticking out past the sheath is a single-tube cantilever: it adds tip sweep but contributes nothing to the instability.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="group" data-group="sheath">
+      <div class="group-head" onclick="toggleGroup('sheath')"><span><span class="swatch" style="background:var(--water)"></span>Outer / constraint tube</span><span class="chev">&#9656;</span></div>
+      <div class="group-body">
+        <div class="callout">
+          <b>Why this matters:</b> a snap needs <i>two</i> curved members fighting each other. If the outer tube is perfectly straight (&kappa;&#8322;&nbsp;=&nbsp;0) there is nothing for the fin tube to be "anti-aligned" against, and rotation becomes smooth with no snap &mdash; try dragging &kappa;&#8322; to 0 below and watch the plots flatten out.
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Curvature &kappa;&#8322;</span><span class="val" id="v_kappa2">18.0 /m</span></div>
+          <input type="range" id="kappa2" min="0" max="40" step="0.5" value="18">
+          <div class="field-note" id="note_R2">Radius of curvature: 55.6 mm. Set to 0 for a truly straight sheath.</div>
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Straight transmission length (&beta;)</span><span class="val" id="v_beta">35 mm</span></div>
+          <input type="range" id="beta" min="2" max="150" step="1" value="35">
+          <div class="field-note" id="note_betasig"><b>Not the overlap.</b> This is the proximal run where the tubes are held <i>straight</i> (zero curvature) and only transmit torque &mdash; motor collet to where precurvature begins. &beta;/L<sub>c</sub> = 0.58</div>
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Outer diameter (OD&#8322;)</span><span class="val" id="v_OD2">2.20 mm</span></div>
+          <input type="range" id="OD2" min="1.2" max="5.0" step="0.05" value="2.2">
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Inner diameter (ID&#8322;)</span><span class="val" id="v_ID2">1.60 mm</span></div>
+          <input type="range" id="ID2" min="0.8" max="4.5" step="0.05" value="1.6">
+          <div class="field-note" id="note_clear">Clearance over fin OD&#8321;: 0.13 mm</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="group" data-group="material">
+      <div class="group-head" onclick="toggleGroup('material')"><span><span class="swatch" style="background:#B9C4D0"></span>Material</span><span class="chev">&#9656;</span></div>
+      <div class="group-body">
+        <div class="field">
+          <div class="field-label"><span>Fin tube modulus E&#8321;</span><span class="val" id="v_E1">50 GPa</span></div>
+          <input type="range" id="E1" min="20" max="90" step="1" value="50">
+          <div class="field-note">Nitinol's effective (superelastic-plateau) modulus is soft and design-dependent &mdash; 30&ndash;70 GPa is a reasonable exploration range.</div>
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Sheath modulus E&#8322;</span><span class="val" id="v_E2">193 GPa</span></div>
+          <input type="range" id="E2" min="20" max="210" step="1" value="193">
+          <div class="seg" style="margin-top:6px;">
+            <button onclick="setE2(50, this)">Nitinol</button>
+            <button onclick="setE2(193, this)" class="active">Steel</button>
+            <button onclick="setE2(105, this)">Ti alloy</button>
+          </div>
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Poisson's ratio &nu;</span><span class="val" id="v_nu">0.33</span></div>
+          <input type="range" id="nu" min="0.20" max="0.60" step="0.01" value="0.33">
+          <div class="field-note">Gilbert et&nbsp;al. found an <i>effective</i> k<sub>b</sub>/k<sub>t</sub> fit closer to &nu;&#8776;0.6 for real Nitinol bending/torsion &mdash; try raising this to see the sensitivity.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="group" data-group="motor">
+      <div class="group-head" onclick="toggleGroup('motor')"><span><span class="swatch" style="background:var(--energy)"></span>Motor</span><span class="chev">&#9656;</span></div>
+      <div class="group-body">
+        <div class="field-note" style="margin-top:0;">Defaults reflect a 6 V, 100:1 N20 gearmotor (as in the minigrant proposal) &mdash; adjust to match your exact datasheet.</div>
+        <div class="field">
+          <div class="field-label"><span>No-load speed</span><span class="val" id="v_wnl">100 RPM</span></div>
+          <input type="range" id="wnl" min="10" max="300" step="1" value="100">
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Target operating speed</span><span class="val" id="v_wop">70 RPM</span></div>
+          <input type="range" id="wop" min="1" max="299" step="1" value="70">
+          <div class="field-note">The RPM you actually want the fin base spinning at, under load.</div>
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Stall torque</span><span class="val" id="v_Tstall">150 N&middot;mm</span></div>
+          <input type="range" id="Tstall" min="10" max="400" step="1" value="150">
+          <div class="field-note" id="note_kgcm">&asymp; 1.53 kgf&middot;cm. Small N20 gearmotors vary 3&ndash;20&nbsp;kgf&middot;cm by supplier &mdash; check your unit's datasheet.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="group" data-group="water">
+      <div class="group-head" onclick="toggleGroup('water')"><span><span class="swatch" style="background:var(--water)"></span>Water &amp; fin shape</span><span class="chev">&#9656;</span></div>
+      <div class="group-body">
+        <div class="field">
+          <div class="field-label"><span>Fin (paddle) width</span><span class="val" id="v_finW">8 mm</span></div>
+          <input type="range" id="finW" min="2" max="25" step="0.5" value="8">
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Drag coefficient C<sub>d</sub></span><span class="val" id="v_Cd">1.3</span></div>
+          <input type="range" id="Cd" min="0.3" max="2.0" step="0.05" value="1.3">
+          <div class="field-note">&asymp;1.1&ndash;1.3 for a flat paddle moving broadside; lower if the fin feathers edge-on during recovery.</div>
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Water density</span><span class="val" id="v_rho">997 kg/m&sup3;</span></div>
+          <input type="range" id="rho" min="995" max="1030" step="1" value="997">
+        </div>
+      </div>
+    </div>
+
+    <div class="group" data-group="robot">
+      <div class="group-head" onclick="toggleGroup('robot')"><span><span class="swatch" style="background:#B9C4D0"></span>Robot body (for speed estimate)</span><span class="chev">&#9656;</span></div>
+      <div class="group-body">
+        <div class="field">
+          <div class="field-label"><span>Number of fins snapping</span><span class="val" id="v_nfins">2</span></div>
+          <input type="range" id="nfins" min="1" max="4" step="1" value="2">
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Robot mass</span><span class="val" id="v_mass">0.35 kg</span></div>
+          <input type="range" id="mass" min="0.05" max="2.0" step="0.01" value="0.35">
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Frontal drag area</span><span class="val" id="v_area">20 cm&sup2;</span></div>
+          <input type="range" id="area" min="4" max="100" step="1" value="20">
+        </div>
+        <div class="field">
+          <div class="field-label"><span>Body drag coefficient</span><span class="val" id="v_bodyCd">0.8</span></div>
+          <input type="range" id="bodyCd" min="0.2" max="1.5" step="0.05" value="0.8">
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align:center; margin-top:14px;">
+      <button class="btn" style="width:100%; justify-content:center;" onclick="resetDefaults()">&#8634; Reset to defaults</button>
+    </div>
+
+  </div>
+
+  <!-- ============= MAIN ============= -->
+  <div class="main">
+
+    <div class="tabbar">
+      <button class="tab active" id="tabbtn-design" onclick="setTab('design')">Design simulator</button>
+      <button class="tab" id="tabbtn-landscape" onclick="setTab('landscape')">Energy landscape</button>
+    </div>
+
+    <div id="tab-design">
+    <div class="card">
+      <div class="hero-grid">
+        <div class="schematic-wrap">
+          <svg id="schematic" width="280" height="280" viewBox="0 0 280 280"></svg>
+          <div class="transport">
+            <button class="btn primary" id="playBtn" onclick="togglePlay()">&#9654; Spin motor</button>
+            <button class="btn" onclick="stepOne()">+1 rev</button>
+          </div>
+          <input type="range" id="scrub" min="0" max="1000" step="1" value="0" style="width:100%;">
+          <div class="readouts">
+            <div class="readout"><div class="l">Base angle</div><div class="v metal" id="r_base">0&deg;</div></div>
+            <div class="readout"><div class="l">Fin tip angle</div><div class="v water" id="r_tip">0&deg;</div></div>
+            <div class="readout"><div class="l">Stored elastic energy</div><div class="v energy" id="r_energy">0 mJ</div></div>
+            <div class="readout"><div class="l">Snaps / revolution</div><div class="v" id="r_snapsPerRev">&mdash;</div></div>
+          </div>
+        </div>
+        <div>
+          <div class="card-head"><h2>Fin tip angle vs. motor base angle</h2><span class="desc">3 motor revolutions</span></div>
+          <div class="card-sub">This is the shape of the "turtle stroke": the tip tracks the base smoothly, then <b style="color:var(--energy)">snaps</b> discontinuously once per revolution as the fin tube passes through its unstable, anti-aligned configuration.</div>
+          <div class="chart-box tall"><canvas id="chartAngle"></canvas></div>
+          <div class="legend-row">
+            <span class="li"><span class="sw" style="background:var(--metal)"></span>1:1 reference (base = tip)</span>
+            <span class="li"><span class="sw" style="background:var(--water)"></span>Fin tip angle</span>
+            <span class="li"><span class="sw dot" style="background:var(--energy)"></span>Snap event</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Stored elastic energy through one cycle</h2><span class="desc">relative to cycle minimum</span></div>
+      <div class="card-sub">The motor does work winding torsional &amp; bending energy into the tube. At the snap, that energy releases almost instantly &mdash; this sudden drop is the "burst" in burst-and-coast swimming.</div>
+      <div class="chart-box"><canvas id="chartEnergy"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Energy budget &mdash; does the motor supply enough, efficiently?</h2></div>
+      <div class="card-sub">Comparing what the motor can deliver against what the snap cycle actually needs and what reaches the water.</div>
+
+      <div class="budget-grid">
+        <div class="budget-tile"><div class="l">Motor energy budget / rev</div><div class="v" id="b_motorE">&mdash;<span class="u">mJ</span></div></div>
+        <div class="budget-tile"><div class="l">Elastic work needed / cycle</div><div class="v" id="b_neededE">&mdash;<span class="u">mJ</span></div></div>
+        <div class="budget-tile"><div class="l">Energy released / snap</div><div class="v" id="b_releasedE">&mdash;<span class="u">mJ</span></div></div>
+        <div class="budget-tile"><div class="l">Est. hydrodynamic work / stroke</div><div class="v" id="b_hydroE">&mdash;<span class="u">mJ</span></div></div>
+      </div>
+
+      <div class="check-row">
+        <div><div class="label">Average energy margin</div><div class="detail" id="chk_energy_detail">&mdash;</div></div>
+        <span class="pill good" id="chk_energy_pill">OK</span>
+      </div>
+      <div class="check-row">
+        <div><div class="label">Peak torque margin</div><div class="detail" id="chk_torque_detail">&mdash;</div></div>
+        <span class="pill good" id="chk_torque_pill">OK</span>
+      </div>
+      <div class="check-row">
+        <div>
+          <div class="label">Nitinol bending strain (safety)</div>
+          <div class="detail" id="chk_strain_detail">&mdash;</div>
+          <div class="strain-bar"><div class="fill" id="strainFill" style="width:0%; background:var(--good);"></div><div class="marker" style="left:50%;" title="4% cyclic-safe guideline"></div><div class="marker" style="left:100%;" title="~8% recoverable limit"></div></div>
+        </div>
+        <span class="pill good" id="chk_strain_pill">OK</span>
+      </div>
+
+      <div class="callout" style="margin-top:12px;">
+        <b>Estimated cruise speed:</b> <span id="cruiseSpeed" class="mono">&mdash;</span> &mdash; found by balancing average thrust power (from snap energy release, across all fins) against quadratic body drag. This ignores mechanism friction, superelastic hysteresis losses, and unsteady/added-mass hydrodynamics, so treat it as an optimistic order-of-magnitude number, not a prediction.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h2>Why the curves look the way they do</h2></div>
+      <div id="whyText" class="card-sub" style="margin-bottom:0;"></div>
+    </div>
+
+    </div><!-- /tab-design -->
+
+    <!-- ============= LANDSCAPE TAB ============= -->
+    <div id="tab-landscape" style="display:none;">
+
+      <div class="card">
+        <div class="card-head">
+          <h2>The energy landscape &mdash; where the snap actually comes from</h2>
+        </div>
+        <div class="card-sub">
+          This is the conceptual view: forget tube diameters for a moment and look at the <i>shape of the energy function</i>. The ball sits in a valley of the potential
+          <span class="mono">V(&theta;) = &frac12;(&theta; &minus; &alpha;)&sup2; &minus; &lambda;&thinsp;cos&thinsp;&theta;</span>.
+          The first term is a spring pulling the tube toward whatever angle the motor commands (&alpha;); the second is the two tubes trying to align with each other. Turn the motor and the whole landscape tilts. Past a critical tilt the valley <b>flattens out and disappears</b> &mdash; and the ball has nowhere to go but roll to the next valley. That roll is the snap.
+        </div>
+
+        <div class="lscape-grid">
+          <div class="lscape-controls">
+            <div class="field">
+              <div class="field-label"><span>Bifurcation parameter &lambda;</span><span class="val" id="v_Llam">2.80</span></div>
+              <input type="range" id="Llam" min="0.1" max="5" step="0.05" value="2.8">
+              <div class="field-note" id="note_Llam">In <i>this</i> one-variable caricature the fold appears at <b>&lambda;&nbsp;&gt;&nbsp;1</b> (where 1&nbsp;+&nbsp;&lambda;&thinsp;cos&thinsp;&theta; can go negative). The &pi;&sup2;/4&nbsp;&asymp;&nbsp;2.47 threshold you see quoted belongs to the <i>continuous rod</i> problem on the other tab &mdash; same mechanism, different number, because there &theta; varies along the length.</div>
+            </div>
+            <div class="field">
+              <div class="field-label"><span>Base / motor angle &alpha;</span><span class="val" id="v_Lalpha">0&deg;</span></div>
+              <input type="range" id="Lalpha" min="-540" max="540" step="1" value="0">
+              <div class="field-note">Drag slowly through the fold and watch the ball fall.</div>
+            </div>
+            <div class="transport" style="margin-top:4px;">
+              <button class="btn primary" id="LplayBtn" onclick="toggleLPlay()">&#9654; Sweep &alpha;</button>
+              <button class="btn" onclick="resetLandscape()">Reset</button>
+            </div>
+
+            <div class="readouts" style="margin-top:14px;">
+              <div class="readout"><div class="l">Tip angle &theta;</div><div class="v water" id="Lr_theta">0&deg;</div></div>
+              <div class="readout"><div class="l">Curvature V&Prime;(&theta;)</div><div class="v" id="Lr_stiff">3.80</div></div>
+              <div class="readout"><div class="l">Twist energy</div><div class="v metal" id="Lr_tors">0.00</div></div>
+              <div class="readout"><div class="l">Align energy</div><div class="v energy" id="Lr_bend">0.00</div></div>
+            </div>
+
+            <div id="Lstatus" class="callout" style="margin-top:12px;">
+              <b>Stable.</b> The ball is sitting in a real valley &mdash; V&Prime;&nbsp;&gt;&nbsp;0, so small nudges push it back.
+            </div>
+          </div>
+
+          <div class="lscape-plots">
+            <div class="plot-box">
+              <div class="plot-title">Potential V(&theta;) &mdash; the ball rolls downhill</div>
+              <svg id="Lsvg" viewBox="0 0 440 240" width="100%"></svg>
+            </div>
+            <div class="plot-box">
+              <div class="plot-title">Equilibrium curve &mdash; the S-shaped fold</div>
+              <svg id="Ssvg" viewBox="0 0 440 240" width="100%"></svg>
+              <div class="plot-note">Solid = stable equilibria (V&Prime;&nbsp;&gt;&nbsp;0). Dashed = unstable (V&Prime;&nbsp;&lt;&nbsp;0) &mdash; real, but impossible to sit on, like a pencil on its tip. Where the solid branch runs out, the ball must jump. The orange dot is your current state.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>Reading the fold</h2></div>
+        <div class="card-sub" style="margin-bottom:0;">
+          <p style="margin:0 0 10px;"><b>Below &lambda;&nbsp;=&nbsp;1</b> the S-curve isn't S-shaped at all &mdash; it's a single-valued line. Every motor angle maps to exactly one tip angle, the tube tracks smoothly, and there is nothing to snap. Drag &lambda; below 1 and watch the dashed middle branch vanish. (Careful: this threshold is 1 for this one-variable model, not the &pi;&sup2;/4&nbsp;&asymp;&nbsp;2.47 quoted for the full rod &mdash; the mechanism is identical, but the critical number depends on how many degrees of freedom you keep.)</p>
+          <p style="margin:0 0 10px;"><b>Above it</b>, the curve folds over onto itself: for a range of motor angles there are <i>three</i> equilibria &mdash; two stable, one unstable between them. The tube is sitting on the upper or lower stable branch. As you keep turning, your branch curves around toward the fold point, where it merges with the unstable branch and both annihilate. That is the same double condition from the math: <span class="mono">V&prime;(&theta;)&nbsp;=&nbsp;0</span> <i>and</i> <span class="mono">V&Prime;(&theta;)&nbsp;=&nbsp;0</span> at once. The valley hasn't just gotten shallow, it has ceased to exist.</p>
+          <p style="margin:0 0 10px;"><b>This is why snapping is hysteretic.</b> Sweep &alpha; up and it snaps at one angle; sweep back down and it snaps at a different one. The tube's state depends on where it has <i>been</i>, not just where the motor is now &mdash; which is exactly what produces the staircase plot on the design tab, and why the solver there has to track branches rather than just solve for a root.</p>
+          <p style="margin:0;"><b>How this relates to the other tab.</b> This landscape is the intuition-level caricature: one number &theta;, one spring, one well. The design tab solves the real thing &mdash; &theta;(s) varying continuously along the tube, governed by <span class="mono">&theta;&Prime;(s)&nbsp;=&nbsp;(&lambda;/L<sub>c</sub>&sup2;)&thinsp;sin&thinsp;&theta;(s)</span>, with your actual diameters, curvatures and lengths feeding into &lambda;. Same bifurcation, same fold, infinitely many degrees of freedom instead of one.</p>
+        </div>
+      </div>
+
+    </div><!-- /tab-landscape -->
+
+  </div>
+</div>
+
+<footer>
+  Model: two-curved-member elastic bifurcation theory (Gilbert, Hendrick &amp; Webster, <i>IEEE T-RO</i> 2016), solved here as a shooting-method boundary value problem &theta;''(s) = (&lambda;/L<sub>c</sub>&sup2;)&nbsp;sin&thinsp;&theta;(s) with Newton continuation to track the loaded branch through fold (snap) points. Hydrodynamic and motor-energy figures are first-order quasi-steady estimates layered on top for design intuition &mdash; validate against your own test jig before committing to a build.
+  <br><br>
+  <b>This model is frictionless.</b> Tube-on-tube sliding and twisting contact is <i>not</i> represented anywhere above &mdash; the formulation is purely conservative elastic energy. Gilbert et&nbsp;al. list friction as a leading unmodeled error source, and note that every one of their 45 experimental trials snapped at a <i>larger</i> base angle than the model predicted. Expect the same bias here: real snaps land later, need more torque to trigger, and release less energy into the water than shown, because some is lost to contact heating and some never gets stored in the first place. Treat all energy and thrust numbers as optimistic upper bounds.
+</footer>
+
+<script>
+/* =========================================================================
+   PHYSICS ENGINE
+   ========================================================================= */
+function rk4(theta0, thetaP0, lamOverLc2, Lc, steps){
+  const h = Lc/steps; let th=theta0, thP=thetaP0;
+  for(let i=0;i<steps;i++){
+    const d=(t,p)=>[p, lamOverLc2*Math.sin(t)];
+    const [k1t,k1p]=d(th,thP);
+    const [k2t,k2p]=d(th+0.5*h*k1t,thP+0.5*h*k1p);
+    const [k3t,k3p]=d(th+0.5*h*k2t,thP+0.5*h*k2p);
+    const [k4t,k4p]=d(th+h*k3t,thP+h*k3p);
+    th += (h/6)*(k1t+2*k2t+2*k3t+k4t);
+    thP += (h/6)*(k1p+2*k2p+2*k3p+k4p);
+  }
+  return {theta:th, thetaP:thP};
+}
+function residual(p, tm, beta, lamOverLc2, Lc, steps){
+  return rk4(tm + beta*p, p, lamOverLc2, Lc, steps).thetaP;
+}
+function newtonSolve(p0, tm, beta, lamOverLc2, Lc, steps, maxIt, tol){
+  let p=p0; const dp=1e-5;
+  for(let it=0; it<maxIt; it++){
+    const f0=residual(p,tm,beta,lamOverLc2,Lc,steps);
+    if(Math.abs(f0)<tol) return {p, converged:true};
+    const f1=residual(p+dp,tm,beta,lamOverLc2,Lc,steps);
+    const der=(f1-f0)/dp;
+    if(Math.abs(der)<1e-8) return {p, converged:false};
+    let step=f0/der;
+    if(Math.abs(step)>2.0) step=Math.sign(step)*2.0;
+    p -= step;
+  }
+  const ff=residual(p,tm,beta,lamOverLc2,Lc,steps);
+  return {p, converged: Math.abs(ff)<tol*100};
+}
+function globalRoots(tm,beta,lamOverLc2,Lc,steps,pMin,pMax,nScan){
+  const roots=[]; let pPrev=pMin, fPrev=residual(pPrev,tm,beta,lamOverLc2,Lc,steps);
+  const dp=(pMax-pMin)/nScan;
+  for(let i=1;i<=nScan;i++){
+    const pCur=pMin+i*dp, fCur=residual(pCur,tm,beta,lamOverLc2,Lc,steps);
+    if(isFinite(fPrev)&&isFinite(fCur)&&fPrev*fCur<0){
+      let lo=pPrev,hi=pCur,flo=fPrev;
+      for(let it=0;it<50;it++){ const mid=0.5*(lo+hi); const fm=residual(mid,tm,beta,lamOverLc2,Lc,steps); if(flo*fm<=0){hi=mid;}else{lo=mid;flo=fm;} }
+      roots.push(0.5*(lo+hi));
+    }
+    pPrev=pCur; fPrev=fCur;
+  }
+  return roots;
+}
+function energyOf(tm,p,beta,lamOverLc2,Lc,steps,Kstar,kt1){
+  const h=Lc/steps; let th=tm+beta*p, thP=p, Ec=0;
+  for(let i=0;i<=steps;i++){
+    const w=(i===0||i===steps)?0.5:1.0;
+    Ec += w*Kstar*(0.5*thP*thP - lamOverLc2*Math.cos(th))*h;
+    if(i<steps){
+      const d=(t,pp)=>[pp, lamOverLc2*Math.sin(t)];
+      const [k1t,k1p]=d(th,thP);
+      const [k2t,k2p]=d(th+0.5*h*k1t,thP+0.5*h*k1p);
+      const [k3t,k3p]=d(th+0.5*h*k2t,thP+0.5*h*k2p);
+      const [k4t,k4p]=d(th+h*k3t,thP+h*k3p);
+      th += (h/6)*(k1t+2*k2t+2*k3t+k4t);
+      thP += (h/6)*(k1p+2*k2p+2*k3p+k4p);
+    }
+  }
+  const Es = 0.5*kt1*p*p*beta;
+  return {Ecurved:Ec, Estraight:Es, Etotal:Ec+Es, tipAngle:th};
+}
+
+function computeDerived(P){
+  const G1 = P.E1/(2*(1+P.nu)), G2 = P.E2/(2*(1+P.nu));
+  const I1 = Math.PI/64*(Math.pow(P.OD1,4)-Math.pow(P.ID1,4));
+  const I2 = Math.PI/64*(Math.pow(P.OD2,4)-Math.pow(P.ID2,4));
+  const J1 = 2*I1, J2 = 2*I2;
+  const kb1 = P.E1*I1, kt1 = G1*J1;
+  const kb2 = P.E2*I2, kt2 = G2*J2;
+  const lambda = (P.kappa2>1e-9) ? (P.Lc*P.Lc*P.kappa1*P.kappa2*(kb1/kt1)*(kb2/kt2)*(kt1+kt2)/(kb1+kb2)) : 0;
+  const Kstar = kt1*kt2/(kt1+kt2);
+  return {I1,I2,J1,J2,kb1,kt1,kb2,kt2,lambda,Kstar};
+}
+
+function runSweep(P, revs, N, steps){
+  const D = computeDerived(P);
+  const lamOverLc2 = D.lambda/(P.Lc*P.Lc);
+  const thetaMotorMax = revs*2*Math.PI;
+  let prevP=0, prevPrevP=null, lastTip=null, lastEnergy=null;
+  const sweep=[]; const snaps=[];
+  for(let i=0;i<=N;i++){
+    const tm = (thetaMotorMax*i)/N;
+    let pred = prevP;
+    if (prevPrevP!==null) pred = 2*prevP - prevPrevP;
+    let sol = newtonSolve(pred, tm, P.beta, lamOverLc2, P.Lc, steps, 35, 1e-9);
+    let snapped=false, Ebefore=null, Tbefore=null;
+    if(!sol.converged || Math.abs(sol.p-prevP)>5){
+      if(lastEnergy!==null){ Ebefore=lastEnergy; Tbefore=lastTip; }
+      const roots = globalRoots(tm, P.beta, lamOverLc2, P.Lc, steps, -60, 60, 500);
+      let best=null, bestE=Infinity;
+      for(const r of roots){ if(Math.abs(r-prevP)<0.5) continue; const en=energyOf(tm,r,P.beta,lamOverLc2,P.Lc,steps,D.Kstar,D.kt1); if(en.Etotal<bestE){bestE=en.Etotal;best=r;} }
+      if(best===null){ for(const r of roots){ const en=energyOf(tm,r,P.beta,lamOverLc2,P.Lc,steps,D.Kstar,D.kt1); if(en.Etotal<bestE){bestE=en.Etotal;best=r;} } }
+      if(best===null) best = prevP;
+      sol = {p:best, converged:true};
+      snapped = true;
+    }
+    const en = energyOf(tm, sol.p, P.beta, lamOverLc2, P.Lc, steps, D.Kstar, D.kt1);
+    if(snapped && Ebefore!==null && Math.abs(en.tipAngle-Tbefore)>0.15){
+      snaps.push({thetaMotor:tm, tipBefore:Tbefore, tipAfter:en.tipAngle, Ebefore, Eafter:en.Etotal, released: Ebefore-en.Etotal});
+    }
+    prevPrevP=prevP; prevP=sol.p; lastTip=en.tipAngle; lastEnergy=en.Etotal;
+    sweep.push({thetaMotor:tm, tipAngle:en.tipAngle, energy:en.Etotal});
+  }
+  return {sweep, snaps, D};
+}
+
+/* =========================================================================
+   STATE
+   ========================================================================= */
+const DEFAULTS = {
+  OD1:1.47, ID1:1.28, kappa1:24, Lc:60,
+  kappa2:18, beta:35, OD2:2.2, ID2:1.6,
+  E1:50, E2:193, nu:0.33,
+  wnl:100, wop:70, Tstall:150,
+  finW:8, Cd:1.3, rho:997,
+  nfins:2, mass:0.35, area:20, bodyCd:0.8
+};
+let S = {...DEFAULTS};
+let result = null;   // {sweep, snaps, D}
+let playing = false;
+let playRAF = null;
+let playStartTs = null;
+let scrubMax = 3; // revolutions shown
+
+const ids = Object.keys(DEFAULTS);
+
+function readInputs(){
+  ids.forEach(id=>{ const el=document.getElementById(id); if(el) S[id]=parseFloat(el.value); });
+  // safety clamps so a dragged slider can never produce a negative wall thickness (which
+  // would break the I = pi/64*(OD^4-ID^4) stiffness calc) -- keep UI in sync if we clamp.
+  if(S.ID1 > S.OD1 - 0.08){ S.ID1 = Math.max(0.1, S.OD1-0.08); document.getElementById('ID1').value = S.ID1; }
+  if(S.ID2 > S.OD2 - 0.08){ S.ID2 = Math.max(0.1, S.OD2-0.08); document.getElementById('ID2').value = S.ID2; }
+}
+function writeInputs(){
+  ids.forEach(id=>{ const el=document.getElementById(id); if(el) el.value = S[id]; });
+}
+
+function paramsSI(){
+  return {
+    OD1: S.OD1/1000, ID1: S.ID1/1000, kappa1: S.kappa1,
+    OD2: S.OD2/1000, ID2: S.ID2/1000, kappa2: S.kappa2,
+    E1: S.E1*1e9, E2: S.E2*1e9, nu: S.nu,
+    Lc: S.Lc/1000, beta: S.beta/1000
+  };
+}
+
+/* =========================================================================
+   CHARTS
+   ========================================================================= */
+let chartAngle, chartEnergy;
+function initCharts(){
+  const gridColor = 'rgba(255,255,255,0.05)';
+  const fontColor = '#8E9DB0';
+  Chart.defaults.font.family = "'IBM Plex Mono', monospace";
+  Chart.defaults.font.size = 10.5;
+  Chart.defaults.color = fontColor;
+
+  chartAngle = new Chart(document.getElementById('chartAngle'), {
+    type:'line',
+    data:{ datasets:[
+      { label:'reference', data:[], borderColor:'rgba(203,169,104,0.35)', borderDash:[4,3], borderWidth:1.5, pointRadius:0, tension:0 },
+      { label:'tip angle', data:[], borderColor:'#4CB6D9', backgroundColor:'rgba(76,182,217,0.08)', borderWidth:2.2, pointRadius:0, tension:0, fill:true, spanGaps:false },
+      { label:'snaps', type:'scatter', data:[], backgroundColor:'#FF6E4C', pointRadius:4, pointHoverRadius:5 }
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      interaction:{ mode:'nearest', intersect:false },
+      plugins:{ legend:{ display:false }, tooltip:{
+        callbacks:{ label:(c)=> c.parsed.y===null ? '' : 'tip: ' + c.parsed.y.toFixed(3) + ' rev (' + ((c.parsed.y*360)%360).toFixed(0) + '\u00B0 in-cycle)' }
+      }},
+      scales:{
+        x:{ type:'linear', title:{display:true, text:'base rotation (revolutions)', color:fontColor}, grid:{color:gridColor}, min:0 },
+        y:{ title:{display:true, text:'angle (revolutions)', color:fontColor}, grid:{color:gridColor} }
+      }
+    }
+  });
+
+  chartEnergy = new Chart(document.getElementById('chartEnergy'), {
+    type:'line',
+    data:{ datasets:[
+      { label:'stored energy', data:[], borderColor:'#FF6E4C', backgroundColor:'rgba(255,110,76,0.12)', borderWidth:2.2, pointRadius:0, tension:0, fill:true, spanGaps:false }
+    ]},
+    options:{
+      responsive:true, maintainAspectRatio:false, animation:false,
+      plugins:{ legend:{ display:false }, tooltip:{ callbacks:{ label:(c)=> (c.parsed.y).toFixed(1) + ' mJ' } } },
+      scales:{
+        x:{ type:'linear', title:{display:true, text:'base rotation (revolutions)', color:fontColor}, grid:{color:gridColor}, min:0 },
+        y:{ title:{display:true, text:'energy (mJ)', color:fontColor}, grid:{color:gridColor} }
+      }
+    }
+  });
+}
+
+function updateCharts(){
+  const rev = (x)=> x/(2*Math.PI);
+  const angleData = result.sweep.map(pt=>({x:rev(pt.thetaMotor), y:rev(pt.tipAngle)}));
+  // insert null to break line at snap jumps
+  const withGaps = [];
+  for(let i=0;i<result.sweep.length;i++){
+    withGaps.push(angleData[i]);
+    const isSnap = result.snaps.some(s=>Math.abs(s.thetaMotor-result.sweep[i].thetaMotor)<1e-6);
+    if(isSnap) withGaps.push({x:angleData[i].x, y:null});
+  }
+  chartAngle.data.datasets[1].data = withGaps;
+  const refMax = result.sweep[result.sweep.length-1].thetaMotor;
+  chartAngle.data.datasets[0].data = [{x:0,y:0},{x:rev(refMax),y:rev(refMax)}];
+  chartAngle.data.datasets[2].data = result.snaps.map(s=>({x:rev(s.thetaMotor), y:rev(s.tipAfter)}));
+  chartAngle.options.scales.x.max = rev(refMax);
+  chartAngle.update();
+
+  const minE = Math.min(...result.sweep.map(p=>p.energy));
+  const energyData = [];
+  for(let i=0;i<result.sweep.length;i++){
+    energyData.push({x:rev(result.sweep[i].thetaMotor), y:(result.sweep[i].energy-minE)*1000});
+    const isSnap = result.snaps.some(s=>Math.abs(s.thetaMotor-result.sweep[i].thetaMotor)<1e-6);
+    if(isSnap) energyData.push({x:rev(result.sweep[i].thetaMotor), y:null});
+  }
+  chartEnergy.data.datasets[0].data = energyData;
+  chartEnergy.options.scales.x.max = rev(refMax);
+  chartEnergy.update();
+}
+
+/* =========================================================================
+   SCHEMATIC
+   ========================================================================= */
+function drawSchematic(baseAngle, tipAngle, flash){
+  const svg = document.getElementById('schematic');
+  const cx=140, cy=140, rBase=46, rTip=100;
+  const bx = cx + rBase*Math.sin(baseAngle), by = cy - rBase*Math.cos(baseAngle);
+  const tx = cx + rTip*Math.sin(tipAngle), ty = cy - rTip*Math.cos(tipAngle);
+  const finPerpX = Math.cos(tipAngle)*10, finPerpY = Math.sin(tipAngle)*10;
+
+  svg.innerHTML = `
+    <circle cx="${cx}" cy="${cy}" r="${rTip+18}" fill="none" stroke="#1D2836" stroke-width="1"/>
+    <circle cx="${cx}" cy="${cy}" r="${rBase+10}" fill="none" stroke="#1D2836" stroke-width="1" stroke-dasharray="2,4"/>
+    ${flash ? `<circle cx="${cx}" cy="${cy}" r="${rTip+18}" fill="none" stroke="#FF6E4C" stroke-width="3" class="snap-flash"/>` : ''}
+    <line x1="${cx}" y1="${cy}" x2="${bx}" y2="${by}" stroke="#CBA968" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="${cx}" cy="${cy}" r="5" fill="#CBA968"/>
+    <path d="M ${cx} ${cy} Q ${cx + (tx-cx)*0.5 - finPerpY} ${cy + (ty-cy)*0.5 + finPerpX} ${tx} ${ty}"
+          fill="none" stroke="#4CB6D9" stroke-width="5" stroke-linecap="round"/>
+    <polygon points="${tx - finPerpX},${ty - finPerpY} ${tx + finPerpX},${ty + finPerpY} ${tx + 1.7*(tx-cx)/rTip*8},${ty + 1.7*(ty-cy)/rTip*8}"
+             fill="#4CB6D9" opacity="0.55"/>
+    <text x="140" y="270" text-anchor="middle" fill="#5C6B80" font-size="10" font-family="IBM Plex Mono">top view &middot; base (gold) vs. fin tip (blue)</text>
+  `;
+}
+
+/* =========================================================================
+   MAIN RECOMPUTE + UI SYNC
+   ========================================================================= */
+function fmtDeg(rad){ let d = (rad*180/Math.PI) % 360; if(d<0) d+=360; return d.toFixed(0)+'\u00B0'; }
+
+function recompute(){
+  readInputs();
+  const P = paramsSI();
+  const N = 620, steps = 80;
+  result = runSweep(P, scrubMax, N, steps);
+  const D = result.D;
+
+  // ---- labels ----
+  document.getElementById('v_OD1').textContent = S.OD1.toFixed(2)+' mm';
+  document.getElementById('v_ID1').textContent = S.ID1.toFixed(2)+' mm';
+  document.getElementById('note_wall1').textContent = 'Wall thickness: ' + ((S.OD1-S.ID1)/2).toFixed(3) + ' mm';
+  document.getElementById('v_kappa1').textContent = S.kappa1.toFixed(1)+' /m';
+  document.getElementById('note_R1').textContent = 'Radius of curvature: ' + (1000/S.kappa1).toFixed(1) + ' mm';
+  document.getElementById('v_Lc').textContent = S.Lc.toFixed(0)+' mm';
+  document.getElementById('v_kappa2').textContent = S.kappa2.toFixed(1)+' /m';
+  document.getElementById('note_R2').textContent = S.kappa2>0.5 ? ('Radius of curvature: ' + (1000/S.kappa2).toFixed(1) + ' mm.') : 'Perfectly straight sheath \u2014 see note above.';
+  document.getElementById('v_beta').textContent = S.beta.toFixed(0)+' mm';
+  document.getElementById('note_betasig').textContent = 'How much of the fin tube sits inside the sheath before it exits and curves. \u03B2/L\u1D9C = ' + (S.beta/S.Lc).toFixed(2);
+  document.getElementById('v_OD2').textContent = S.OD2.toFixed(2)+' mm';
+  document.getElementById('v_ID2').textContent = S.ID2.toFixed(2)+' mm';
+  const clearance = (S.ID2 - S.OD1)/2;
+  document.getElementById('note_clear').textContent = 'Clearance over fin OD\u2081: ' + clearance.toFixed(2) + ' mm' + (clearance<0 ? '  \u26A0 tubes overlap \u2014 increase ID\u2082 or shrink OD\u2081' : '');
+  document.getElementById('v_E1').textContent = S.E1.toFixed(0)+' GPa';
+  document.getElementById('v_E2').textContent = S.E2.toFixed(0)+' GPa';
+  document.getElementById('v_nu').textContent = S.nu.toFixed(2);
+  document.getElementById('v_wnl').textContent = S.wnl.toFixed(0)+' RPM';
+  document.getElementById('v_wop').textContent = S.wop.toFixed(0)+' RPM';
+  document.getElementById('v_Tstall').textContent = S.Tstall.toFixed(0)+' N\u00B7mm';
+  document.getElementById('note_kgcm').textContent = '\u2248 ' + (S.Tstall*0.0102).toFixed(2) + ' kgf\u00B7cm. Small N20 gearmotors vary 3\u201320 kgf\u00B7cm by supplier \u2014 check your unit\'s datasheet.';
+  document.getElementById('v_finW').textContent = S.finW.toFixed(1)+' mm';
+  document.getElementById('v_Cd').textContent = S.Cd.toFixed(2);
+  document.getElementById('v_rho').textContent = S.rho.toFixed(0)+' kg/m\u00B3';
+  document.getElementById('v_nfins').textContent = S.nfins;
+  document.getElementById('v_mass').textContent = S.mass.toFixed(2)+' kg';
+  document.getElementById('v_area').textContent = S.area.toFixed(0)+' cm\u00B2';
+  document.getElementById('v_bodyCd').textContent = S.bodyCd.toFixed(2);
+  if(S.wop >= S.wnl){ S.wop = S.wnl-1; document.getElementById('wop').value = S.wop; document.getElementById('v_wop').textContent = S.wop.toFixed(0)+' RPM'; }
+  document.getElementById('wop').max = Math.max(1,S.wnl-1);
+
+  // ---- status badge ----
+  const snapCapable = result.snaps.length > 0;
+  const badge = document.getElementById('statusBadge');
+  const statusText = document.getElementById('statusText');
+  if(snapCapable){
+    badge.className='status-badge status-good';
+    statusText.textContent = 'Snap-capable \u00b7 \u03BB = '+D.lambda.toFixed(2);
+  } else {
+    badge.className='status-badge status-bad';
+    statusText.textContent = 'No snap (smooth) \u00b7 \u03BB = '+D.lambda.toFixed(2);
+  }
+
+  updateCharts();
+
+  // snaps per revolution (from last full revolution in steady state)
+  const snapsInLastRev = result.snaps.filter(s => s.thetaMotor > (scrubMax-1)*2*Math.PI).length;
+  document.getElementById('r_snapsPerRev').textContent = result.snaps.length ? snapsInLastRev : '0';
+
+  updateEnergyBudget(P, D);
+  updateWhyText(P, D, snapCapable);
+  updateScrub();
+}
+
+function torqueAvail(rpm){
+  const wnl_rads = S.wnl*2*Math.PI/60;
+  const w_rads = rpm*2*Math.PI/60;
+  const Tstall_Nm = S.Tstall/1000;
+  return Math.max(0, Tstall_Nm*(1-w_rads/wnl_rads));
+}
+
+function updateEnergyBudget(P, D){
+  if(result.snaps.length===0){
+    ['b_motorE','b_neededE','b_releasedE','b_hydroE'].forEach(id=>document.getElementById(id).innerHTML='&mdash;<span class="u">mJ</span>');
+    setPill('chk_energy_pill','warn','\u2014'); document.getElementById('chk_energy_detail').textContent = 'No snap occurs with current settings \u2014 nothing to budget yet.';
+    setPill('chk_torque_pill','warn','\u2014'); document.getElementById('chk_torque_detail').textContent = 'N/A';
+    document.getElementById('cruiseSpeed').textContent = 'n/a \u2014 fin does not snap, so this model predicts no burst thrust';
+  } else {
+    // use last full cycle for steady-state numbers
+    const lastSnap = result.snaps[result.snaps.length-1];
+    const prevSnap = result.snaps.length>1 ? result.snaps[result.snaps.length-2] : null;
+    const released = lastSnap.released; // J
+    // needed = climb from just-after-previous-snap energy to just-before-this-snap energy
+    const needed = lastSnap.Ebefore - (prevSnap ? prevSnap.Eafter : result.sweep[0].energy);
+
+    const Tavail = torqueAvail(S.wop);
+    const motorEPerRev = Tavail * 2*Math.PI; // J, simple available-energy budget at operating speed
+
+    // peak reaction torque over smooth segments (finite differences), excluding snap jumps
+    let peakTorque = 0;
+    for(let i=1;i<result.sweep.length;i++){
+      const a=result.sweep[i-1], b=result.sweep[i];
+      const isSnap = result.snaps.some(s=>Math.abs(s.thetaMotor-b.thetaMotor)<1e-6);
+      if(isSnap) continue;
+      const dT = (b.energy-a.energy)/(b.thetaMotor-a.thetaMotor);
+      if(isFinite(dT)) peakTorque = Math.max(peakTorque, dT);
+    }
+
+    // hydrodynamic estimate
+    const dTip = Math.abs(lastSnap.tipAfter - lastSnap.tipBefore);
+    const Afin = (S.finW/1000)*(S.Lc/1000);
+    const sSwept = dTip*(S.Lc/1000);
+    const hydroE = Math.min(released, released); // assume ~all released energy does drag work (upper bound estimate)
+    const vChar = Math.sqrt( (2*hydroE) / (S.rho*S.Cd*Afin*Math.max(sSwept,1e-6)) );
+
+    document.getElementById('b_motorE').innerHTML = (motorEPerRev*1000).toFixed(1)+'<span class="u">mJ</span>';
+    document.getElementById('b_neededE').innerHTML = (needed*1000).toFixed(1)+'<span class="u">mJ</span>';
+    document.getElementById('b_releasedE').innerHTML = (released*1000).toFixed(1)+'<span class="u">mJ</span>';
+    document.getElementById('b_hydroE').innerHTML = (hydroE*1000).toFixed(1)+'<span class="u">mJ</span>';
+
+    const ratio = motorEPerRev/needed;
+    if(ratio >= 1.15){ setPill('chk_energy_pill','good','OK'); }
+    else if(ratio >= 1.0){ setPill('chk_energy_pill','warn','Tight'); }
+    else { setPill('chk_energy_pill','bad','Short'); }
+    document.getElementById('chk_energy_detail').textContent = 'Motor supplies ' + (motorEPerRev*1000).toFixed(0) + ' mJ/rev at ' + S.wop + ' RPM vs. ' + (needed*1000).toFixed(0) + ' mJ needed to reach the snap (' + (ratio*100).toFixed(0) + '% margin).';
+
+    const Tmargin = Tavail/peakTorque;
+    if(Tmargin >= 1.3){ setPill('chk_torque_pill','good','OK'); }
+    else if(Tmargin >= 1.0){ setPill('chk_torque_pill','warn','Tight'); }
+    else { setPill('chk_torque_pill','bad','Insufficient'); }
+    document.getElementById('chk_torque_detail').textContent = 'Peak reaction torque \u2248 ' + (peakTorque*1000).toFixed(1) + ' N\u00B7mm vs. ' + (Tavail*1000).toFixed(1) + ' N\u00B7mm available at ' + S.wop + ' RPM (quasi-static estimate \u2014 real rotor inertia and momentum can carry it through a brief deficit, but a sustained one will bog the motor down and delay the snap).';
+
+    // cruise speed
+    const cycleTime = 60/S.wop; // s per revolution = s per snap (1 snap/rev assumed dominant)
+    const Pthrust = (S.nfins*released)/cycleTime;
+    const areaM2 = S.area/1e4;
+    const vCruise = Math.pow( (2*Pthrust)/(S.rho*S.bodyCd*areaM2), 1/3 );
+    document.getElementById('cruiseSpeed').innerHTML = (vCruise*100).toFixed(1)+' cm/s <span style="color:var(--text-faint)">('+(vCruise).toFixed(3)+' m/s, from '+(Pthrust*1000).toFixed(0)+' mW avg. thrust power across '+S.nfins+' fin(s))</span>';
+  }
+
+  // strain check (uses tube 1 regardless of snap state)
+  const strain = (S.kappa1 * (S.OD1/1000/2)) * 100; // percent
+  const pct = Math.min(100, (strain/8)*100);
+  const fill = document.getElementById('strainFill');
+  fill.style.width = pct+'%';
+  let pillClass, pillText;
+  if(strain < 4){ pillClass='good'; pillText='Safe'; fill.style.background='var(--good)'; }
+  else if(strain < 8){ pillClass='warn'; pillText='Marginal'; fill.style.background='var(--warn)'; }
+  else { pillClass='bad'; pillText='Exceeds limit'; fill.style.background='var(--bad)'; }
+  setPill('chk_strain_pill', pillClass, pillText);
+  document.getElementById('chk_strain_detail').textContent = 'Outer-fiber bending strain \u2248 ' + strain.toFixed(2) + '% (\u03BA\u2081\u00D7OD\u2081/2). Nitinol recovers up to ~8% superelastically; ~4% is a common cyclic-fatigue-safe design guideline.';
+}
+
+function setPill(id, cls, text){ const el=document.getElementById(id); el.className='pill '+cls; el.textContent=text; }
+
+function updateWhyText(P, D, snapCapable){
+  const parts = [];
+  if(!snapCapable){
+    parts.push(`<b>No snap right now.</b> \u03BB = ${D.lambda.toFixed(2)} \u2014 either \u03BA\u2082 (outer tube curvature) is too small/zero, or the combination of curvature, length and stiffness hasn't crossed the bifurcation threshold. Two curved members are what create the two competing energy wells (aligned vs. anti-aligned); without that, the tip just tracks the base 1:1.`);
+  } else {
+    parts.push(`With \u03BB = ${D.lambda.toFixed(2)}, the system crosses its bifurcation point once per motor revolution, near where the fin and sheath curvatures point in opposite directions ("anti-aligned"). Past that point the smooth, low-energy path no longer exists \u2014 the only remaining equilibrium is the other side of the energy landscape, so the tip jumps there almost instantly, releasing the energy built up over the rest of the revolution.`);
+  }
+  parts.push(`<b>Diameter</b> feeds in through the tube's area moment (I \u221D OD\u2074&minus;ID\u2074), so both bending and torsional stiffness &mdash; and hence the strain energy available to snap with &mdash; grow steeply with diameter. That's also why the strain check above matters: a fatter tube at the same curvature stores more energy, but also strains its outer fiber more.`);
+  parts.push(`<b>Straight transmission length \u03B2</b> sets how much torsional "wind-up" happens before the curved section even starts \u2014 it is the held-straight lead-in, <i>not</i> the tube-on-tube overlap. Longer \u03B2 (larger \u03B2/L\u1D9C) shifts the bifurcation to a lower \u03BB and changes exactly where in the revolution the snap lands \u2014 shrink it and the tip tracks the base more directly; stretch it and more of each revolution is spent winding up before release.`);
+  parts.push(`<b>Curvature (\u03BA\u2081, \u03BA\u2082)</b> is the most direct lever on snap energy: released energy grows roughly with the product \u03BA\u2081\u03BA\u2082 through \u03BB. Push it too far, though, and the strain check above will start flagging fatigue risk before you gain much more thrust.`);
+  document.getElementById('whyText').innerHTML = parts.map(p=>`<p style="margin:0 0 10px;">${p}</p>`).join('');
+}
+
+/* =========================================================================
+   SCRUB / ANIMATION
+   ========================================================================= */
+function angleAtFraction(frac){
+  // frac in [0,1] across the full sweep range shown (scrubMax revolutions)
+  const targetMotor = frac*scrubMax*2*Math.PI;
+  let lo=0, hi=result.sweep.length-1;
+  if(targetMotor<=result.sweep[0].thetaMotor) return {base:result.sweep[0].thetaMotor, tip:result.sweep[0].tipAngle, energy:result.sweep[0].energy, flash:false};
+  if(targetMotor>=result.sweep[hi].thetaMotor) return {base:result.sweep[hi].thetaMotor, tip:result.sweep[hi].tipAngle, energy:result.sweep[hi].energy, flash:false};
+  while(lo<hi-1){ const mid=(lo+hi)>>1; if(result.sweep[mid].thetaMotor<targetMotor) lo=mid; else hi=mid; }
+  const a=result.sweep[lo], b=result.sweep[hi];
+  const t=(targetMotor-a.thetaMotor)/((b.thetaMotor-a.thetaMotor)||1);
+  const isNearSnap = result.snaps.some(s=>Math.abs(s.thetaMotor-targetMotor)<0.05);
+  const tip = (t<0.5? a.tipAngle : b.tipAngle);
+  const energy = a.energy + (b.energy-a.energy)*t;
+  return {base:targetMotor, tip, energy, flash:isNearSnap};
+}
+
+function updateScrub(){
+  const frac = parseFloat(document.getElementById('scrub').value)/1000;
+  const st = angleAtFraction(frac);
+  drawSchematic(st.base % (2*Math.PI), st.tip % (2*Math.PI), st.flash);
+  document.getElementById('r_base').textContent = fmtDeg(st.base);
+  document.getElementById('r_tip').textContent = fmtDeg(st.tip);
+  const minE = Math.min(...result.sweep.map(p=>p.energy));
+  document.getElementById('r_energy').textContent = ((st.energy-minE)*1000).toFixed(1)+' mJ';
+}
+
+function togglePlay(){
+  playing = !playing;
+  document.getElementById('playBtn').innerHTML = playing ? '&#10074;&#10074; Pause' : '&#9654; Spin motor';
+  if(playing){ playStartTs=null; requestAnimationFrame(playFrame); }
+}
+function playFrame(ts){
+  if(!playing) return;
+  if(playStartTs===null) playStartTs=ts;
+  const revPerSec = S.wop/60;
+  const elapsed=(ts-playStartTs)/1000;
+  let frac=(elapsed*revPerSec)/scrubMax;
+  frac = frac % 1;
+  document.getElementById('scrub').value = Math.round(frac*1000);
+  updateScrub();
+  playRAF = requestAnimationFrame(playFrame);
+}
+function stepOne(){
+  playing=false; document.getElementById('playBtn').innerHTML='&#9654; Spin motor';
+  let v = parseFloat(document.getElementById('scrub').value);
+  v = (v + 1000/scrubMax) % 1000;
+  document.getElementById('scrub').value = v;
+  updateScrub();
+}
+
+/* =========================================================================
+   UI WIRING
+   ========================================================================= */
+function toggleGroup(name){
+  document.querySelector(`.group[data-group="${name}"]`).classList.toggle('open');
+}
+function setE2(val, btn){
+  document.getElementById('E2').value = val;
+  document.querySelectorAll('#controls .group[data-group="material"] .seg button').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  recompute();
+}
+function resetDefaults(){
+  S = {...DEFAULTS};
+  writeInputs();
+  recompute();
+}
+
+let debounceHandle=null;
+function scheduleRecompute(){
+  if(debounceHandle) cancelAnimationFrame(debounceHandle);
+  debounceHandle = requestAnimationFrame(recompute);
+}
+
+ids.forEach(id=>{
+  const el = document.getElementById(id);
+  if(el) el.addEventListener('input', scheduleRecompute);
+});
+document.getElementById('scrub').addEventListener('input', ()=>{ playing=false; document.getElementById('playBtn').innerHTML='&#9654; Spin motor'; updateScrub(); });
+
+/* =========================================================================
+   ENERGY LANDSCAPE TAB
+   Conceptual 1-DOF caricature:  V(theta) = 0.5*(theta-alpha)^2 - lam*cos(theta)
+   ========================================================================= */
+let Ltheta = 0, Lplaying = false, LrafId = null;
+
+function setTab(which){
+  const isD = (which==='design');
+  document.getElementById('tab-design').style.display    = isD ? '' : 'none';
+  document.getElementById('tab-landscape').style.display = isD ? 'none' : '';
+  document.getElementById('tabbtn-design').classList.toggle('active', isD);
+  document.getElementById('tabbtn-landscape').classList.toggle('active', !isD);
+  if(!isD){ drawLandscape(); }
+  else { if(Lplaying) toggleLPlay(); }
+}
+
+const LV      = (t,a,l)=> 0.5*(t-a)*(t-a) - l*Math.cos(t);
+const LdV     = (t,a,l)=> (t-a) + l*Math.sin(t);
+const Ld2V    = (t,l)  => 1 + l*Math.cos(t);
+
+// relax theta toward the nearest local minimum (gradient descent = ball rolling)
+function Lrelax(t,a,l){
+  for(let i=0;i<120;i++){
+    const g = LdV(t,a,l);
+    if(Math.abs(g)<1e-10) break;
+    t -= 0.06*g;
+  }
+  return t;
+}
+
+function LreadInputs(){
+  return {
+    lam: parseFloat(document.getElementById('Llam').value),
+    a:   parseFloat(document.getElementById('Lalpha').value)*Math.PI/180
+  };
+}
+
+function drawLandscape(){
+  const {lam, a} = LreadInputs();
+  Ltheta = Lrelax(Ltheta, a, lam);
+
+  const stiff = Ld2V(Ltheta, lam);
+  const tors  = 0.5*(Ltheta-a)*(Ltheta-a);
+  const bend  = lam*(1-Math.cos(Ltheta));
+
+  document.getElementById('v_Llam').textContent   = lam.toFixed(2);
+  document.getElementById('v_Lalpha').textContent = Math.round(a*180/Math.PI)+'\u00B0';
+  document.getElementById('Lr_theta').textContent = Math.round(Ltheta*180/Math.PI)+'\u00B0';
+  document.getElementById('Lr_stiff').textContent = stiff.toFixed(2);
+  document.getElementById('Lr_tors').textContent  = tors.toFixed(2);
+  document.getElementById('Lr_bend').textContent  = bend.toFixed(2);
+
+  const st = document.getElementById('Lstatus');
+  if(lam <= 1){
+    st.innerHTML = '<b>No fold possible.</b> At \u03BB = '+lam.toFixed(2)+' (below 1) the landscape only ever has one valley. The tube tracks the motor smoothly \u2014 no snap, at any angle.';
+  } else if(stiff < 0.25){
+    st.innerHTML = '<b style="color:var(--energy)">At the edge.</b> V\u2033 = '+stiff.toFixed(2)+' \u2014 the valley has almost flattened out. A little more rotation and it disappears entirely.';
+  } else {
+    st.innerHTML = '<b>Stable.</b> The ball sits in a real valley \u2014 V\u2033 = '+stiff.toFixed(2)+' &gt; 0, so small nudges push it back.';
+  }
+
+  drawWell(lam, a);
+  drawSCurve(lam, a);
+}
+
+/* ---- potential well with rolling ball ---- */
+function drawWell(lam, a){
+  const W=440,H=240, L=38,R=12,T=14,B=30;
+  const tMin = Ltheta-Math.PI*1.6, tMax = Ltheta+Math.PI*1.6;
+  const N=260, pts=[];
+  let vMin=Infinity, vMax=-Infinity;
+  for(let i=0;i<=N;i++){
+    const t = tMin + (tMax-tMin)*i/N;
+    const v = LV(t,a,lam);
+    pts.push([t,v]);
+    if(v<vMin) vMin=v; if(v>vMax) vMax=v;
+  }
+  const pad=(vMax-vMin)*0.12 || 1;
+  vMin-=pad; vMax+=pad;
+  const X = t => L + (t-tMin)/(tMax-tMin)*(W-L-R);
+  const Y = v => T + (vMax-v)/(vMax-vMin)*(H-T-B);
+
+  let s='';
+  // axis
+  s+='<line x1="'+L+'" y1="'+(H-B)+'" x2="'+(W-R)+'" y2="'+(H-B)+'" stroke="var(--border)" stroke-width="1"/>';
+  s+='<text x="'+(W-R)+'" y="'+(H-B+18)+'" fill="var(--text-faint)" font-size="10" text-anchor="end">tip angle \u03B8 \u2192</text>';
+  s+='<text x="'+L+'" y="'+(T+2)+'" fill="var(--text-faint)" font-size="10">V(\u03B8)</text>';
+
+  // curve
+  s+='<polyline fill="none" stroke="var(--water)" stroke-width="2.2" points="'+
+     pts.map(p=>X(p[0]).toFixed(1)+','+Y(p[1]).toFixed(1)).join(' ')+'"/>';
+
+  // mark all equilibria in view
+  for(let i=1;i<pts.length;i++){
+    const g0=LdV(pts[i-1][0],a,lam), g1=LdV(pts[i][0],a,lam);
+    if(g0===0 || g0*g1<0){
+      let lo=pts[i-1][0], hi=pts[i][0];
+      for(let k=0;k<40;k++){ const m=(lo+hi)/2; if(LdV(lo,a,lam)*LdV(m,a,lam)<=0) hi=m; else lo=m; }
+      const te=(lo+hi)/2, stable=Ld2V(te,lam)>0;
+      s+='<circle cx="'+X(te).toFixed(1)+'" cy="'+Y(LV(te,a,lam)).toFixed(1)+'" r="3" fill="none" stroke="'+
+         (stable?'var(--good)':'var(--bad)')+'" stroke-width="1.6"'+(stable?'':' stroke-dasharray="2 1.5"')+'/>';
+    }
+  }
+
+  // ball
+  const bx=X(Ltheta), by=Y(LV(Ltheta,a,lam));
+  s+='<circle cx="'+bx.toFixed(1)+'" cy="'+by.toFixed(1)+'" r="7" fill="var(--energy)" opacity="0.25"/>';
+  s+='<circle cx="'+bx.toFixed(1)+'" cy="'+by.toFixed(1)+'" r="4.5" fill="var(--energy)"/>';
+
+  // motor angle marker
+  if(a>tMin && a<tMax){
+    s+='<line x1="'+X(a).toFixed(1)+'" y1="'+T+'" x2="'+X(a).toFixed(1)+'" y2="'+(H-B)+'" stroke="var(--metal)" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>';
+    s+='<text x="'+(X(a)+4).toFixed(1)+'" y="'+(T+11)+'" fill="var(--metal)" font-size="10">\u03B1</text>';
+  }
+  document.getElementById('Lsvg').innerHTML = s;
+}
+
+/* ---- S-curve: equilibrium theta vs alpha ---- */
+function drawSCurve(lam, a){
+  const W=440,H=240, L=42,R=12,T=14,B=30;
+  // parameterise by theta: alpha = theta + lam*sin(theta)
+  const tLo=-Math.PI*2.2, tHi=Math.PI*2.2, N=700;
+  const seg=[]; let cur=null, curStable=null;
+  let aMin=Infinity,aMax=-Infinity;
+  const data=[];
+  for(let i=0;i<=N;i++){
+    const t=tLo+(tHi-tLo)*i/N;
+    const al=t+lam*Math.sin(t);
+    const stable=Ld2V(t,lam)>0;
+    data.push([al,t,stable]);
+    if(al<aMin)aMin=al; if(al>aMax)aMax=al;
+  }
+  const X=v=>L+(v-aMin)/(aMax-aMin)*(W-L-R);
+  const Y=t=>T+(tHi-t)/(tHi-tLo)*(H-T-B);
+
+  for(const d of data){
+    if(curStable===null || d[2]!==curStable){
+      if(cur&&cur.length>1) seg.push([curStable,cur]);
+      cur=[]; curStable=d[2];
+    }
+    cur.push(d);
+  }
+  if(cur&&cur.length>1) seg.push([curStable,cur]);
+
+  let s='';
+  s+='<line x1="'+L+'" y1="'+(H-B)+'" x2="'+(W-R)+'" y2="'+(H-B)+'" stroke="var(--border)" stroke-width="1"/>';
+  s+='<text x="'+(W-R)+'" y="'+(H-B+18)+'" fill="var(--text-faint)" font-size="10" text-anchor="end">motor angle \u03B1 \u2192</text>';
+  s+='<text x="'+L+'" y="'+(T+2)+'" fill="var(--text-faint)" font-size="10">\u03B8</text>';
+
+  for(const [stable,arr] of seg){
+    s+='<polyline fill="none" stroke="'+(stable?'var(--water)':'var(--bad)')+'" stroke-width="'+(stable?'2.2':'1.6')+'"'+
+       (stable?'':' stroke-dasharray="4 3" opacity="0.85"')+' points="'+
+       arr.map(d=>X(d[0]).toFixed(1)+','+Y(d[1]).toFixed(1)).join(' ')+'"/>';
+  }
+
+  if(a>=aMin&&a<=aMax){
+    s+='<circle cx="'+X(a).toFixed(1)+'" cy="'+Y(Ltheta).toFixed(1)+'" r="7" fill="var(--energy)" opacity="0.22"/>';
+    s+='<circle cx="'+X(a).toFixed(1)+'" cy="'+Y(Ltheta).toFixed(1)+'" r="4.5" fill="var(--energy)"/>';
+  }
+  document.getElementById('Ssvg').innerHTML = s;
+}
+
+function toggleLPlay(){
+  Lplaying = !Lplaying;
+  document.getElementById('LplayBtn').innerHTML = Lplaying ? '&#10073;&#10073; Pause' : '&#9654; Sweep &alpha;';
+  if(Lplaying) Lstep(); else if(LrafId){ cancelAnimationFrame(LrafId); LrafId=null; }
+}
+function Lstep(){
+  if(!Lplaying) return;
+  const el=document.getElementById('Lalpha');
+  let v=parseFloat(el.value)+0.8;
+  if(v>540) v=-540;
+  el.value=v;
+  drawLandscape();
+  LrafId=requestAnimationFrame(Lstep);
+}
+function resetLandscape(){
+  if(Lplaying) toggleLPlay();
+  document.getElementById('Llam').value=2.8;
+  document.getElementById('Lalpha').value=0;
+  Ltheta=0;
+  drawLandscape();
+}
+['Llam','Lalpha'].forEach(id=>{
+  const el=document.getElementById(id);
+  if(el) el.addEventListener('input', ()=>{ if(Lplaying) toggleLPlay(); drawLandscape(); });
+});
+
+/* =========================================================================
+   INIT
+   ========================================================================= */
+writeInputs();
+initCharts();
+recompute();
+drawLandscape();
+</script>
+</body>
+</html>

@@ -1,0 +1,626 @@
+================================================================================
+CONCENTRIC TUBE ROBOT (CTR) SNAP-PHYSICS — GROUND TRUTH RULES
+================================================================================
+Purpose of this file: this is the authoritative physics/math reference for the
+CTR continuum simulator + design-optimization project. Any code (Claude Code,
+future sessions, anyone) that computes bifurcation, energy, stiffness, strain,
+or fatigue for this project MUST be consistent with the equations below. Where
+the current simulator uses a SIMPLIFIED model instead of the literature-exact
+one, that is called out explicitly — simplifications are allowed, silent
+substitutions are not. If a rule below and the running code disagree, the code
+is wrong, not this file.
+
+Primary source: Gilbert, Hendrick, Webster, "Elastic Stability of Concentric
+Tube Robots: A Stability Measure and Design Test," IEEE Trans. Robotics,
+vol. 32, no. 1, 2016, pp. 20-35. Equation numbers (e.g. "(8a)") refer to this
+paper unless stated otherwise. This is the ONLY source in the project that
+derives the bifurcation math from first principles — treat it as load-bearing.
+
+================================================================================
+PART 0 — WHAT EACH SOURCE FILE IN THE PROJECT ACTUALLY CONTAINS
+================================================================================
+
+1) Elastic_Stability_of_Concentric_Tube_Robots_A_Stability_Measure_and_Design_
+   Test_4.pdf  (Gilbert, Hendrick, Webster, IEEE T-RO 2016)  ["THE STABILITY PAPER"]
+   - THE core math source for this whole project. Derives the governing
+     boundary value problem, the bifurcation parameter lambda, the critical
+     value lambda0 = pi^2/4, the exact transmission-length-dependent
+     bifurcation condition, and a Sturm-Liouville "relative stability" test
+     that generalizes beyond 2 tubes.
+   - Beam-buckling analogy: a two-tube CTR's relative twist angle theta(s)
+     obeys the SAME ODE as an Euler beam under a dead end-load. Aligned
+     precurvatures = beam in tension (always stable). Antialigned
+     precurvatures = beam in compression (can buckle/snap).
+   - Gives the exact formula for lambda in terms of BOTH tubes' bending and
+     torsional stiffnesses and BOTH curvatures multiplied together (not
+     squared — see Part 2, this is the specific mistake the user flagged).
+   - Gives the equivalent-transmission-length formula for unequal proximal
+     straight sections (Result 2), and the general n-tube stability operator
+     S (Eq. 18) via the second variation of the elastic energy functional.
+   - Discusses design implications: reduce transmission length, add tubes to
+     "steer around" instabilities, use non-constant precurvature.
+
+2) Towards_a_Steerable_Neurosurgical_Robot_for_Debulking_of_Brain_Mass_
+   Lesions_1.pdf  (Saini et al., IEEE RA-L 2025)  ["THE NEUROSURGERY PAPER"]
+   - Applied/mechanical-design reference, NOT a source of new bifurcation
+     math. Describes a 4-concentric-tube device (rigid outer tube, notched
+     precurved Nitinol tube, braid-reinforced cutting tube, suction tube)
+     for debulking brain mass lesions via rotating a notched tube inside a
+     straight outer tube plus a rotary tissue-cutting/aspiration mechanism.
+   - Useful real-world numbers: measured precurvature of their assembled
+     tube ~7.2 m^-1; tip positioning error ~4-5% of extended tube length;
+     540% tissue-removal efficiency improvement over suction alone.
+   - Constant-curvature kinematic model assumption, closed-form inverse
+     kinematics for tip position (translation + rotation actuator space).
+   - Use this file only for plausibility-checking realistic curvature/
+     dimension ranges, NOT for the physics of snapping.
+
+3) Is_intermittent_swimming_lazy_or_clever_.pdf  (Quinn, Science Robotics 2026)
+   ["THE SWIMMING PAPER"]
+   - Biology/fluids reference motivating "burst-and-coast" locomotion: fish
+     and robots alternating active thrust bursts with passive coasting can
+     save power relative to continuous steady propulsion at the same average
+     speed. This is the entire justification for treating a CTR snap as a
+     thrust source (project's "turtle robot fin" concept).
+   - Contains NO tube mechanics, no lambda, no strain equations. It is cited
+     purely for the hydrodynamic-efficiency motivation behind the design
+     optimizer's eta_hydro = 1 - exp(-0.05*dE) term (see Part 5) — that
+     specific functional form is an ENGINEERING PLACEHOLDER inspired by this
+     paper's qualitative saturation argument, not a formula taken from it.
+     Do not attribute a specific numeric law to this paper; it is not there.
+
+4) Naman_Athavale_2026UCR_Research_MinigrantSubmissionEdited.pdf
+   ["THE MINIGRANT PROPOSAL"]
+   - The project's own grant proposal. States the goal explicitly: build an
+     underwater CTR "fin" that exploits elastic snap instability for
+     burst-and-coast swimming propulsion, using Nitinol capillary tubing
+     driven by 100:1 gear-ratio N20 motors and a 3S LiPo battery (high
+     current surges needed to overcome torsional stiffness and trigger the
+     snap). Cites sources 1-3 above directly.
+   - Confirms project framing: exploit the SAME instability that surgical
+     CTR designers try to eliminate. Useful for keeping tone/goals of any
+     generated text (docs, in-app copy) consistent with the actual proposal.
+   - No new equations. Timeline/budget content is not physics-relevant.
+
+5) Physical_Parameters.txt  ["THE MATERIAL PARAMETERS FILE"]
+   - Canonical Nitinol material constants for THIS project. Any code
+     computing stiffness or strain must be traceable to these numbers or
+     explicitly say it deviates and why.
+     E   = 50e9   Pa      (Young's modulus, Nitinol)
+     nu  = 0.33            (Poisson's ratio)
+     G   = E / (2*(1+nu))  (shear modulus, derived — DO NOT hardcode a
+                            separate G; it must always equal this expression)
+     OD  = 1.47e-3 m        (outer diameter, inner/reference tube)
+     ID  = 1.28e-3 m        (inner diameter)
+     I   = (pi/64) * (OD^4 - ID^4)   (area moment of inertia)
+     J   = 2 * I                     (polar moment of inertia, thin circular
+                                      tube: J = 2I is exact for a circular
+                                      cross-section, do not re-derive it)
+     kb  = E * I           (bending stiffness)
+     kt  = G * J           (torsional stiffness)
+   - NOTE: the tube-snapping-simulator.tsx artifact and the workbench design
+     engine currently use a DIFFERENT diameter (d_o = 1.02 mm) for the
+     "turtle fin" Nitinol tube than this OD/ID pair (1.47/1.28 mm). Both are
+     legitimate — this file's dimensions describe one candidate tube, the fin
+     design engine uses a thinner capillary tube. THEY ARE NOT
+     INTERCHANGEABLE. Any new code must state which physical tube's
+     dimensions it is using and pull E, nu, G from this file's formulas
+     regardless of which OD/ID pair is chosen. Never invent a new value of E,
+     G, or nu from memory — derive G from E and nu exactly as above.
+
+6) YoutubeTranscript.txt  ["STABILIZATION THROUGH STIFFNESS ASYMMETRY" VIDEO]
+   - Secondary/qualitative source, NOT a numeric source. Summarizes a talk on
+     using transverse (direction-dependent) flexural rigidity, achieved via
+     laser-cut slot patterns in the tube wall, to improve stability beyond
+     what symmetric stiffness reduction can achieve — weakening bending
+     stiffness specifically about the axis of precurvature improves
+     stability quadratically. No formulas are given in the transcript.
+   - Use only as design-narrative background (e.g. "why real CTR designs use
+     notched/slotted tubes," matches the neurosurgery paper's notched tube).
+     Do not derive any numeric relationship from this file — it doesn't
+     contain one.
+
+7) tube-snapping-simulator.tsx  ["PRIOR ARTIFACT / IN-APP THEORY GUIDE"]
+   - An earlier version of this project's simulator. Its in-app "Theory
+     Guide" panel already states the CORRECT general lambda formula
+     (reproduced exactly in Part 2 below) and cites the stability paper by
+     bracketed number [1] throughout. If future code disagrees with the
+     lambda formula printed in that theory guide, the theory guide is
+     right and the code is wrong — go fix the code.
+
+================================================================================
+PART 1 — THE GOVERNING EQUATION (do not replace this with an ad hoc ODE)
+================================================================================
+
+For a two-tube CTR with constant precurvature and equal transmission lengths,
+nondimensionalized so arc length sigma runs from a proximal boundary to the
+distal tip at sigma = 1, the relative twist angle theta(sigma) between the two
+tubes' precurvature vectors obeys the SECOND-ORDER BOUNDARY VALUE PROBLEM:
+
+    theta'' - lambda * sin(theta) = 0                                  (8a)
+    theta(0)  = alpha_2(0) - alpha_1(0) - beta_sigma * theta'(0)       (8b, general)
+    theta'(1) = 0                                                      (8c)
+
+  where ' = d/d(sigma), beta_sigma = beta/L_c is the dimensionless straight
+  transmission length before the curved overlap begins, and lambda is defined
+  in Part 2. This is IDENTICAL in form to the ODE for an Euler beam bent by a
+  dead end-load (beam buckling problem) — that analogy is why the paper's
+  language of "buckling" and "bifurcation" applies directly.
+
+  Special case beta_sigma = 0 (tubes' curved sections begin exactly at the
+  base, no straight transmission length): boundary condition (8b) reduces to
+  theta(0) = alpha_2(0) - alpha_1(0), i.e. the base twist directly sets the
+  boundary value.
+
+RULE: this is a DISTRIBUTED boundary value problem over arc length, not an
+instantaneous single-degree-of-freedom system. The lumped 1-DOF model used
+elsewhere in this project's code (Part 4) is a SIMPLIFICATION of this BVP for
+a fully-overlapped short section with no transmission length, treated as a
+single effective torsional spring. Any code claiming to solve the "exact" or
+"distributed" CTR model must integrate (8a) as a two-point BVP (e.g. shooting
+method or finite differences), not a single ODE in time.
+
+================================================================================
+PART 2 — THE BIFURCATION PARAMETER LAMBDA (get this right — this is the bug
+that was previously missed)
+================================================================================
+
+EXACT, GENERAL TWO-TUBE FORMULA (this is what the paper derives and what the
+project's own in-app Theory Guide already states correctly):
+
+    lambda = L_c^2 * kappa_1 * kappa_2 * (k1b / k1t) * (k2b / k2t)
+             * (k1t + k2t) / (k1b + k2b)
+
+  equivalently, grouped the other way (algebraically identical):
+
+    lambda = L_c^2 * kappa_1 * kappa_2 * [ (k1b * k2b) / (k1b + k2b) ]
+             * [ (k1t + k2t) / (k1t * k2t) ]
+
+  where:
+    L_c            = length of the overlapped, precurved section (meters)
+    kappa_1, kappa_2 = precurvatures of tube 1 and tube 2 (1/meters)
+    k1b, k2b       = bending stiffnesses of tube 1 and tube 2 (kb = E*I, from
+                     Part 0.5's material file)
+    k1t, k2t       = torsional stiffnesses of tube 1 and tube 2 (kt = G*J)
+
+CRITICAL RULE — THE MISTAKE TO NEVER REPEAT:
+  Lambda depends on the PRODUCT kappa_1 * kappa_2 of the two tubes'
+  precurvatures, NOT on either curvature squared. kappa_1^2 or kappa_2^2 is
+  WRONG unless kappa_1 == kappa_2 (in which case kappa_1*kappa_2 = kappa^2 is
+  correct only as a coincidence of that special case, not as the general
+  rule). Any sweep, slider, or optimizer that varies "kappa" as a single free
+  parameter is implicitly assuming kappa_1 = kappa_2 = kappa and MUST say so
+  explicitly in a comment. If the two tubes have different curvatures, the
+  code must multiply them, not square one.
+
+  If kappa_1 = 0 (straight outer tube — an explicitly named snap-free design
+  strategy in the paper's Theory Guide), lambda = 0 identically, regardless
+  of kappa_2. This is a good sanity check for any implementation: setting
+  either tube's curvature to zero must zero out lambda.
+
+SPECIAL CASE — EQUAL BENDING AND TORSIONAL STIFFNESS (k1b = k2b = kb,
+k1t = k2t = kt), e.g. two tubes of the same material and cross-section:
+
+    lambda = L_c^2 * kappa_1 * kappa_2 * (kb / kt)
+
+  and since kb/kt = (E*I)/(G*J) = (E)/(G*2) [using J = 2I] = (1+nu) for a
+  circular cross-section (from G = E/(2(1+nu))):
+
+    lambda = L_c^2 * kappa_1 * kappa_2 * (1 + nu)
+
+  With nu = 0.33 (Part 0.5), kb/kt = 1.33 exactly. This is the correct,
+  reduced formula IF AND ONLY IF both tubes share bending and torsional
+  stiffness. It is still kappa_1 * kappa_2, not kappa^2, unless the two
+  curvatures also happen to be equal. Any code that sets both tubes to the
+  same material and calls the free design parameter "kappa" (single value,
+  implying kappa_1 = kappa_2 = kappa) may then correctly write
+  lambda = L_c^2 * kappa^2 * (1+nu) — but only because kappa_1 = kappa_2 was
+  ALREADY assumed, and that assumption must be stated, not silently baked in.
+
+TRANSMISSION-LENGTH-DEPENDENT BIFURCATION CONDITION (Result 1 in the paper):
+  A bifurcation point exists at (lambda, theta=pi) satisfying
+
+    beta_sigma = - cot(sqrt(lambda)) / sqrt(lambda)                     (9)
+
+  This determines, for a GIVEN nonzero transmission length beta_sigma, the
+  exact lambda at which snapping first becomes possible. Longer transmission
+  lengths push the bifurcation point toward lambda = 0 — i.e. they make the
+  design LESS forgiving, not more. Any code implying that longer straight
+  transmission sections improve stability margin is backwards; the paper
+  states the opposite and recommends minimizing transmission length or
+  stiffening it.
+
+CRITICAL VALUE FOR ZERO TRANSMISSION LENGTH (beta_sigma = 0), the number this
+whole project's snap threshold is built around:
+
+    lambda_0 = pi^2 / 4  ~=  2.4674011...
+
+  This is the textbook two-tube result (also cited independently in [10],
+  [11] of the stability paper) and is the correct constant to use for the
+  fully-overlapped, no-transmission-length model that this project's
+  simulator implements. Do not substitute a different numeric threshold
+  without also implementing nonzero beta_sigma via Eq. (9).
+
+EQUIVALENT TRANSMISSION LENGTH FOR UNEQUAL PROXIMAL SECTIONS (Result 2, only
+needed if the two tubes are clamped at different points):
+
+    beta_eq,sigma = (beta_1,sigma * k2t + beta_2,sigma * k1t) / (k1t + k2t)
+
+  Substitute this single beta_eq,sigma into Eq. (9) in place of beta_sigma for
+  a two-tube robot whose transmission lengths differ between tubes.
+
+NEAR-BIFURCATION ASYMPTOTIC BEHAVIOR (Eq. 11, beta_sigma = 0 case), useful for
+validating any numerical solver against a closed form near the critical point:
+
+    theta(1) = pi +- 2*sqrt(2) * sqrt( (lambda - lambda_0) / lambda_0 ),
+               for lambda >= lambda_0 = pi^2/4
+
+  The "+-" reflects the pitchfork: two new stable branches emerge symmetric
+  about theta = pi as lambda crosses lambda_0, and near the critical point
+  they diverge from the trivial branch with INFINITE slope in
+  d(theta)/d(lambda) — the geometric reason large amplitude snaps are so
+  sensitive right past the critical lambda.
+
+BIFURCATION TYPE: this is a supercritical pitchfork bifurcation — the
+nontrivial (bent) branches exist ONLY for lambda >= lambda_0, never below.
+Do not implement a subcritical (hysteretic in lambda itself) bifurcation
+diagram; hysteresis in this project comes from sweeping the BASE TWIST alpha
+at fixed lambda (Part 4), not from lambda itself having memory.
+
+================================================================================
+PART 3 — STABILITY / THE SECOND VARIATION (why some equilibria are unphysical)
+================================================================================
+
+Equation (8a) is a necessary condition for equilibrium (Euler-Lagrange
+stationarity of the elastic energy functional) but NOT sufficient for
+stability — exactly as a stationary point of a function can be a maximum,
+minimum, or saddle. Physical CTR configurations must be LOCAL MINIMA of the
+energy functional
+
+    E[theta] = integral_0^beta_sigma (1/2)(theta')^2 dsigma
+             + integral_beta_sigma^1 [ (1/2)(theta')^2 - lambda*cos(theta) ] dsigma      (16)
+
+Stability is tested with the second variation (Sturm-Liouville) operator:
+
+    S[h] = -h'' + lambda*cos(theta)*h                                    (18)
+
+  acting on admissible variations h(sigma) with h(beta_sigma) = 0 and
+  h'(1) = 0. The configuration theta(sigma) is elastically stable if and only
+  if EVERY eigenvalue of S is strictly positive. This generalizes the
+  bifurcation analysis to n-tube robots and to non-equilibrium points along a
+  branch, giving a continuous "relative stability" measure (not just a
+  binary snap/no-snap flag) that the paper plots in its Fig. 4-5 S-curve
+  color maps.
+
+REDUCED (LUMPED, single-point) STABILITY CRITERION consistent with this
+project's simplified 1-DOF model (Part 4): treating theta as spatially
+uniform (theta(sigma) = theta_tip everywhere, i.e. collapsing the BVP to a
+point mass in an energy well) reduces S[h] = -h'' + lambda*cos(theta)*h to
+its zero-derivative-term limit, giving the familiar scalar stiffness
+
+    V''(theta) = 1 + lambda*cos(theta)
+
+  V'' > 0  =>  locally stable (in a valley)
+  V'' <= 0 =>  locally unstable (on or past a hilltop) — the exact point
+               V'' = 0 is where the well vanishes and a snap must occur if
+               theta is being driven through it.
+
+  RULE: V''(theta) = 1 + lambda*cos(theta) is a legitimate LOCAL / LUMPED
+  proxy for the true Sturm-Liouville stability test, valid for the reduced
+  1-DOF model this project actually simulates in real time. It must NOT be
+  described in code comments or UI copy as "the" stability criterion from the
+  paper without qualification — the paper's actual criterion is the full
+  operator S in Eq. (18) over the whole arc length, which this project
+  deliberately does not solve at 60 fps. Say "lumped/reduced stability
+  margin" or similar, not "the stability measure from [1]" unqualified.
+
+================================================================================
+PART 4 — THE PROJECT'S REDUCED 1-DOF ENERGY MODEL (this is what actually runs
+in the real-time simulator — treat every symbol below as fixed and consistent
+project-wide)
+================================================================================
+
+The real-time simulator collapses the distributed BVP of Part 1 to a single
+generalized coordinate theta_tip, evolving in response to a controllable base
+twist alpha (this is a standard reduced-order approximation for a FULLY
+overlapped, short, symmetric two-tube section — it is NOT what Part 1's BVP
+solves exactly, and any "exact 3D" claims in UI copy should be understood as
+"exact tube CENTERLINE kinematics given the reduced twist theta_tip," not
+"exact distributed torsional solution").
+
+  Energy:      V(theta) = 0.5*(theta - alpha)^2 - lambda*cos(theta)
+  Gradient:    V'(theta) = (theta - alpha) + lambda*sin(theta)
+  Stiffness:   V''(theta) = 1 + lambda*cos(theta)
+
+RULE — DIMENSIONAL CONSISTENCY: theta and alpha here are dimensionless
+(radians), and V(theta) is a dimensionless energy — it is NOT joules. Any
+code that reports V(theta) directly as "Joules" or "elastic energy (J)"
+without a scale factor is wrong. The design-optimization engine's conversion
+to physical Joules uses
+
+    E_physical = V(theta) * (k_t / L_c)
+
+  where k_t is the (shared, equal-stiffness-case) torsional stiffness and
+  L_c is the overlap length — this rescales the nondimensional energy
+  functional back to physical units consistent with how sigma = s/L_c was
+  nondimensionalized in Part 1. Keep this scale factor explicit in code; do
+  not silently drop it or apply it twice.
+
+HYSTERESIS MECHANISM (why sweeping alpha produces a snap, not a smooth
+rotation): the simulator tracks theta_tip via damped/momentum gradient
+descent on V(theta) SEEDED FROM THE PREVIOUS FRAME'S VALUE, not re-solved
+from scratch each frame:
+
+    d(theta)/dt = -(theta - alpha) - lambda*sin(theta) + momentum*(prev step)
+
+  This is a deliberate, correct way to get physical hysteresis out of a
+  quasi-static energy landscape: theta stays trapped in its current local
+  minimum (V'' > 0) even as alpha moves the whole landscape, until that
+  minimum is annihilated (V'' -> 0 at that theta), at which point theta must
+  jump to whatever remaining basin is downhill — the snap. RULE: do not
+  replace this with a global energy minimizer (e.g. re-solving
+  argmin_theta V(theta) fresh every frame) — a global minimizer has NO
+  memory and will not reproduce hysteresis; it will jump the instant a lower
+  basin exists anywhere, not only when the current basin vanishes. This
+  distinction is the entire physical point of the demo.
+
+================================================================================
+PART 5 — KINEMATICS: TIP SHAPE FROM THETA (Bishop frame integration)
+================================================================================
+
+Given theta_tip (from Part 4) and base twist alpha, the twist is interpolated
+linearly along the normalized overlap arc length s in [0, 1]:
+
+    theta(s) = alpha + (theta_tip - alpha) * s
+
+RULE: this LINEAR interpolation is itself an approximation of the true
+theta(sigma) profile that solves the BVP in Part 1 — it is exact only in the
+zero-transmission-length, small-deflection limit, but is used throughout this
+project as the working assumption for real-time 3D rendering. It should not
+be presented as the literature-exact solution to (8a); it is a fast
+substitute for it.
+
+At each s, the LOCAL CURVATURE VECTOR in the (bending-plane) frame, for the
+EQUAL BENDING STIFFNESS case (k1b = k2b, matching the reduced model of
+Part 4), is:
+
+    K_x(s) = ( kappa_1 + kappa_2*cos(theta(s)) ) / 2
+    K_y(s) = ( kappa_2*sin(theta(s)) ) / 2
+
+  This is the vector sum (average, for equal stiffness) of tube 1's
+  curvature (fixed along the local x-axis by convention) and tube 2's
+  curvature rotated by the current relative twist theta(s). RULE: if the two
+  tubes do NOT have equal bending stiffness, this formula is invalid — the
+  general weighted form (matching the lambda formula's stiffness ratios) is
+
+    K_x(s) = ( k1b*kappa_1 + k2b*kappa_2*cos(theta(s)) ) / (k1b + k2b)
+    K_y(s) = ( k2b*kappa_2*sin(theta(s)) ) / (k1b + k2b)
+
+  Any code claiming to support unequal bending stiffness tubes but still
+  using the /2 form above is silently wrong.
+
+The angular velocity vector for frame propagation is omega(s) =
+[K_x(s), K_y(s), 0]^T. The Bishop frame rotation matrix R(s) and centerline
+position p(s) are propagated with the discrete Euler-Rodrigues update:
+
+    p(i+1) = p(i) + R(i) * [0, 0, ds]^T
+    R(i+1) = R(i) * Rodrigues( omega(i) * ds )
+
+  where ds = L_c / N for N discretization steps. RULE: N should be large
+  enough that halving it does not visibly change the tip position (N=50 has
+  been used and is adequate for the tube lengths in this project, ~100 mm
+  overlap; do not drop below ~N=20 without re-checking convergence).
+
+================================================================================
+PART 6 — DESIGN-OPTIMIZATION ENGINE (nitinol fin sweep) — formulas actually
+used and their status (exact / literature-derived vs. engineering estimate)
+================================================================================
+
+All of the following operate on a SINGLE free curvature parameter kappa,
+which the optimizer implicitly treats as kappa_1 = kappa_2 = kappa (Part 2's
+equal-stiffness, equal-curvature special case). If the design workspace is
+ever extended to let the two tubes' curvatures differ independently, EVERY
+formula below must be revisited to use kappa_1*kappa_2 (not kappa^2) and the
+general weighted-stiffness forms from Parts 2 and 5.
+
+  Bifurcation index (equal stiffness/curvature case; Part 2):
+      lambda = L_c^2 * kappa^2 * (1 + nu)          [status: exact, given the
+                                                     equal-tube assumption]
+
+  Bifurcation regime test:
+      lambda <= pi^2/4  =>  stable, no snap, snap energy = 0
+      lambda >  pi^2/4  =>  bifurcated regime, snap energy computed below
+      [status: exact, per Part 2's lambda_0]
+
+  Fold point theta_peak (where V'' first hits zero — the unstable local max
+  the system must climb over before it can snap):
+      cos(theta_peak) = -1/lambda   =>   theta_peak = arccos(-1/lambda)
+      [status: exact — this is just V''(theta)=0 solved for theta, valid
+      whenever lambda > 1 so that -1/lambda is in [-1,1]; combined with the
+      lambda > pi^2/4 > 1 regime test above this is always well-defined]
+
+  Corresponding base twist at the fold (so V'(theta_peak)=0 simultaneously):
+      alpha_snap = theta_peak + lambda*sin(theta_peak)
+      [status: exact, from V'(theta)=(theta-alpha)+lambda*sin(theta)=0]
+
+  Landing basin theta_stable: found numerically as the next root of
+  V'(theta)=0 past theta_peak with V''>0 (bisection over increasing theta).
+  [status: correct method — a nonlinear equation, no closed form is claimed
+  or needed]
+
+  Snap energy released:
+      dE_snap = V(theta_peak) - V(theta_stable)     [dimensionless, Part 4]
+      dE_snap_Joules = dE_snap * (k_t / L_c)         [physical units]
+      [status: exact given the reduced 1-DOF model of Part 4 — this is
+      correctly the height of the barrier the system falls through, not an
+      ad hoc estimate]
+
+  Bending strain (outer fiber of a tube bent to curvature kappa):
+      epsilon_bend = kappa * (d_o / 2)
+      [status: standard/exact beam-bending strain formula (strain = curvature
+      x distance from neutral axis), where d_o is the tube's OUTER diameter —
+      use the material file's OD or the fin's own d_o, whichever tube this
+      calculation is actually describing; do not mix diameters from two
+      different source tubes]
+
+  Torsional shear strain released during the snap:
+      gamma = ( |theta_stable - theta_peak| / L_c ) * (d_o / 2)
+      [status: engineering approximation, NOT from the stability paper. It
+      treats the ANGLE JUMP during the snap as if uniformly distributed over
+      the WHOLE overlap length L_c to get an average torsional shear strain
+      rate times outer radius. This is a reasonable order-of-magnitude
+      estimate for a fast, effectively rigid-body-like snap, but the paper's
+      own theta(sigma) profile is not uniform — treat this number as
+      approximate, not literature-exact, in any documentation or UI copy.]
+
+  Equivalent (von Mises-style) strain combining bend + torsion:
+      epsilon_eq = sqrt( epsilon_bend^2 + 0.33*gamma^2 )
+      [status: engineering approximation. The 0.33 coefficient is being used
+      as a stand-in for nu-dependent shear/normal strain combination and
+      happens to equal this project's Poisson's ratio nu=0.33 — that is a
+      DELIBERATE modeling choice value, not a coincidence, but it is not a
+      rigorous von Mises equivalent strain derivation (true von Mises
+      equivalent strain for combined bending+torsion of a shaft has a
+      different, geometry-dependent closed form). State this as an
+      approximate combined-strain metric, not "the von Mises strain."]
+
+  Actuator work per base rotation cycle:
+      W_in = integral_0^{2*pi} | lambda*sin(theta) * (1 + lambda*cos(theta)) | dtheta
+      [status: this is |tau * dalpha| integrated using tau = -lambda*sin(theta)
+      (from V'(theta)=0 solved for the torque needed to hold theta as alpha
+      is varied) and dalpha = (1+lambda*cos(theta)) dtheta (from
+      differentiating alpha = theta + lambda*sin(theta), the exact inverse
+      equilibrium relation). This is dimensionally and derivationally
+      consistent with the reduced 1-DOF model of Part 4 — treat as exact
+      GIVEN that model, not an independent physical measurement.]
+
+  Hydrodynamic efficiency term:
+      eta_hydro = 1 - exp(-0.05 * dE_snap)
+      [status: ENGINEERING PLACEHOLDER, not derived from any source in this
+      project (see Part 0.3 — the swimming paper motivates the qualitative
+      idea of saturating thrust benefit at high burst energy, but supplies
+      no formula). The constant 0.05 has no physical derivation; it exists
+      to produce a plausible-looking saturation curve. Any future work
+      replacing this with real hydrodynamic data (drag coefficients, added
+      mass, Strouhal number scaling from burst-and-coast swimming
+      literature) should treat this term as a TODO, not a validated model.]
+
+  Coffin-Manson fatigue life:
+      N_cycles = 10 * (epsilon_eq)^-5
+      [status: FUNCTIONAL FORM is the standard Coffin-Manson strain-life
+      power law (N ~ epsilon^-c), but the leading constant "10" and exponent
+      "-5" are ILLUSTRATIVE, not fit to Nitinol test data. This produces
+      unrealistically long lives at low strain (~10^12 cycles at 1% strain
+      was checked numerically and is optimistic by orders of magnitude vs.
+      published superelastic Nitinol fatigue data). RULE: never quote
+      absolute N_cycles numbers from this formula as engineering fact in any
+      report or grant document — only use them for RELATIVE ranking across a
+      design sweep (which point has a longer predicted life than which
+      other point), and say so explicitly wherever N_cycles is displayed.]
+
+  Combined efficiency score:
+      Score = eta_hydro * (dE_snap / W_in) * exp( -(epsilon_eq/epsilon_allow)^4 )
+      [status: ENGINEERING COMPOSITE, weights an explicit material safety
+      gate (the exp(-(...)^4) term collapses the score sharply once strain
+      exceeds the ALLOWABLE strain epsilon_allow) against a snap-energy-per-
+      unit-motor-work ratio and the hydrodynamic saturation term above.
+      epsilon_allow MUST be a fatigue-relevant, cycle-count-appropriate
+      strain limit (see next rule), not Nitinol's monotonic superelastic
+      limit.]
+
+  RULE — WHERE epsilon_allow COMES FROM: the monotonic superelastic strain
+  limit for Nitinol is commonly cited around 8% (0.08), but that is a
+  ONE-TIME strain limit, not a safe limit for a component that snaps every
+  actuation cycle. For a fatigue-relevant limit, invert the Coffin-Manson law
+  above for a target cycle count N:
+      epsilon_allow(N) = (10 / N)^(1/5)
+  A UI slider or default value for "allowable strain" should be justified in
+  terms of a target cycle life via this inversion, not hardcoded to 8% —
+  hardcoding 8% makes the safety gate physically inert across the entire
+  practical curvature range for a ~1 mm diameter tube (verified: bending
+  strain alone stays under ~1.3% even at kappa=25 m^-1 for d_o=1.02mm, so an
+  8% gate never engages and the optimizer just walks to the corner of its
+  parameter box). If epsilon_allow is ever set back to a monotonic limit, the
+  optimizer's "sweet spot" will silently NOT represent a fatigue-safe design
+  and this must be stated wherever the result is displayed.
+
+  RULE — CLIPPING THE KAPPA AXIS: because epsilon_bend = kappa*(d_o/2) is
+  monotonic and unbounded in kappa, any kappa sweep MUST be capped at
+      kappa_max = 2 * epsilon_allow / d_o
+  (i.e. the curvature at which bending strain alone already equals the
+  allowable) or the sweep will contain physically meaningless (guaranteed-
+  failure) grid points that can distort where the "optimum" appears to sit
+  if the score's failure gate is not perfectly sharp. Always compute
+  kappa_max from the CURRENT epsilon_allow, not a fixed constant, since
+  epsilon_allow itself is user-adjustable in this project's UI.
+
+================================================================================
+PART 7 — CONCRETE DO / DO-NOT CHECKLIST (fast pre-flight check before trusting
+any new physics code in this project)
+================================================================================
+
+DO:
+  [ ] Derive lambda from BOTH tubes' curvatures multiplied together
+      (kappa_1 * kappa_2), never a single curvature squared, unless the code
+      explicitly documents kappa_1 = kappa_2 as an assumption.
+  [ ] Derive G from E and nu via G = E/(2*(1+nu)) — never hardcode a separate
+      shear modulus value.
+  [ ] Use J = 2*I for circular tube cross-sections (exact identity, not an
+      approximation).
+  [ ] State which physical tube (OD/ID pair) any given calculation refers to
+      when the project has more than one candidate tube in play (Part 0.5).
+  [ ] Treat lambda_0 = pi^2/4 as the correct critical value ONLY for the
+      zero-transmission-length case; use Eq. (9) if transmission length
+      beta_sigma is ever modeled as nonzero.
+  [ ] Seed any real-time theta solver from the PREVIOUS frame's value if the
+      goal is to reproduce hysteresis (Part 4) — never re-minimize from
+      scratch each frame for that purpose.
+  [ ] Recompute kappa_max from the current epsilon_allow whenever epsilon_allow
+      changes (Part 6), if a kappa sweep is strain-clipped.
+  [ ] Label every "strain," "energy," or "cycle life" number with its units
+      and its status (exact-given-model vs. engineering estimate) per Part 6,
+      especially in anything user-facing (docs, tooltips, reports).
+
+DO NOT:
+  [ ] Do NOT write lambda = L_c^2 * kappa^2 * (const) when kappa_1 != kappa_2
+      are both in play — this silently assumes equal curvatures.
+  [ ] Do NOT call V(theta) from Part 4 "Joules" without multiplying by the
+      k_t/L_c scale factor.
+  [ ] Do NOT call V''(theta)=1+lambda*cos(theta) "the stability measure from
+      [Gilbert et al.]" without qualifying it as the lumped/reduced version —
+      the paper's actual criterion is the Sturm-Liouville operator S (Part 3).
+  [ ] Do NOT treat epsilon_eq's 0.33*gamma^2 term as a literature-derived von
+      Mises strain — it is this project's own engineering approximation.
+  [ ] Do NOT quote absolute Coffin-Manson N_cycles numbers as engineering
+      fact — the constants (10, -5) are illustrative placeholders, not fit
+      to Nitinol test data. Relative comparisons across a sweep are fine.
+  [ ] Do NOT set the fatigue-relevant allowable strain to Nitinol's ~8%
+      monotonic superelastic limit and call it a safety gate for a
+      repeatedly-snapping component — invert Coffin-Manson for a target
+      cycle count instead (Part 6).
+  [ ] Do NOT attribute the eta_hydro saturation formula's constant (0.05) to
+      the swimming paper — that paper supplies qualitative motivation only,
+      not this formula.
+  [ ] Do NOT imply longer transmission length improves stability — Eq. (9)
+      says the opposite.
+  [ ] Do NOT use the /2-form curvature-combination formula (Part 5) if the
+      two tubes have different bending stiffnesses — use the weighted
+      k1b/k2b form instead.
+
+================================================================================
+PART 8 — QUICK-REFERENCE CONSTANT TABLE
+================================================================================
+  lambda_0 (critical, beta_sigma=0)     = pi^2/4              ~= 2.467401...
+  E (Nitinol)                            = 50e9 Pa
+  nu (Nitinol)                           = 0.33
+  G = E/(2*(1+nu))                       ~= 1.8797e10 Pa
+  kb/kt (equal-stiffness tubes)          = 1+nu = 1.33
+  J = 2*I                                (exact, circular cross-section)
+  epsilon_allow(N) = (10/N)^(1/5)        (fatigue strain limit inversion —
+                                          use this, not a flat 8%, for any
+                                          cyclic/repeated-snap design gate)
+  kappa_max(epsilon_allow) = 2*epsilon_allow/d_o   (fatigue-clipped curvature
+                                                     axis ceiling)
+================================================================================
+END OF FILE
+================================================================================

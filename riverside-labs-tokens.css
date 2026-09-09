@@ -1,0 +1,90 @@
+/* Riverside Labs Brand System — design tokens
+   Drop this file into the app and import it before other stylesheets.
+   See BRAND.md for usage rules, component defaults, and rationale. */
+
+@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Fira+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+:root {
+  /* Fonts */
+  --font-display: 'Oswald', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Fira Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+
+  /* Neutrals */
+  --ink-900: #17202B;
+  --ink-600: #4C5567;
+  --line-300: #C6C1B4;
+  --paper-100: #ECEAE3;
+  --paper-50:  #F5F4F0;
+  --surface: #FFFFFF;
+
+  /* Core Institutional (from UCR Pantone 293c / 1235c, desaturated) */
+  --riverside-blue-700: #253C5C;
+  --riverside-blue-500: #4A6690;
+  --riverside-blue-100: #DCE4EE;
+  --riverside-sand-600: #A9884F;
+  --riverside-sand-300: #E4D6B8;
+
+  /* RaMS Lab accent */
+  --rams-700: #33534F;
+  --rams-500: #57847F;
+  --rams-150: #DCEAE7;
+
+  /* Dark Matter & Neutrino Lab accent */
+  --neutrino-700: #363454;
+  --neutrino-500: #5D5A87;
+  --neutrino-150: #E2E0EC;
+
+  /* Semantic status (shared) */
+  --signal-good: #5E8C74;
+  --signal-watch: #B8925A;
+  --signal-critical: #A65D57;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink-900: #E7E5DE;
+    --ink-600: #A6ACB8;
+    --line-300: #3A4048;
+    --paper-100: #1F242B;
+    --paper-50:  #12151A;
+    --surface: #181C22;
+
+    --riverside-blue-700: #B9CCE6;
+    --riverside-blue-500: #7C97C1;
+    --riverside-blue-100: #22344A;
+    --riverside-sand-600: #D2B579;
+    --riverside-sand-300: #3C3524;
+
+    --rams-700: #A9D2CB;
+    --rams-500: #7FADA7;
+    --rams-150: #1D2E2B;
+
+    --neutrino-700: #C4C1E8;
+    --neutrino-500: #928FC2;
+    --neutrino-150: #242238;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ink-900: #E7E5DE;
+  --ink-600: #A6ACB8;
+  --line-300: #3A4048;
+  --paper-100: #1F242B;
+  --paper-50:  #12151A;
+  --surface: #181C22;
+
+  --riverside-blue-700: #B9CCE6;
+  --riverside-blue-500: #7C97C1;
+  --riverside-blue-100: #22344A;
+  --riverside-sand-600: #D2B579;
+  --riverside-sand-300: #3C3524;
+
+  --rams-700: #A9D2CB;
+  --rams-500: #7FADA7;
+  --rams-150: #1D2E2B;
+
+  --neutrino-700: #C4C1E8;
+  --neutrino-500: #928FC2;
+  --neutrino-150: #242238;
+}

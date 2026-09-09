@@ -1,0 +1,25 @@
+/* Riverside Labs tokens must load before anything else so every downstream
+   rule (and the runtime token reader in CTRWorkbench) sees them. */
+@import "../riverside-labs-tokens.css";
+@import "tailwindcss";
+
+/* Tailwind v4 scans these paths for class names. */
+@source "../index.html";
+@source "./**/*.{js,jsx,ts,tsx}";
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--paper-50);
+  color: var(--ink-900);
+  font-family: var(--font-body);
+}
+
+/* Any numeric readout must line up column-wise (BRAND.md, Data role). */
+.tnum, .mono {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
