@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
   Play, Pause, RotateCcw, Zap, Activity, Sliders, Gauge, AlertTriangle,
-  Boxes, Target, ArrowUpRight, ShieldAlert, Waves, Spline,
+  Boxes, Target, ArrowUpRight, ShieldAlert, Waves,
+  Layers, ChevronDown, ChevronLeft, ChevronRight, Ruler,
 } from 'lucide-react';
 
 /* ═══════════════════════════════════════════════════════════════
@@ -75,12 +76,6 @@ const CSS = `
 .ctr-side.scroll{overflow-y:auto;}
 @media(min-width:1400px){.ctr-side{width:420px;}}
 @media(max-width:1000px){.ctr-side{width:300px;}}
-.ctr-sec{padding:15px 16px;border-bottom:1px solid var(--line-300);display:flex;
-  flex-direction:column;gap:10px;}
-.ctr-sec h2{margin:0;display:flex;align-items:center;gap:7px;
-  font-family:var(--font-display);font-weight:500;font-size:15px;line-height:20px;
-  color:var(--ink-900);}
-
 .ctr-cbar{position:absolute;z-index:10;top:50%;right:14px;transform:translateY(-50%);
   display:flex;flex-direction:column;gap:5px;pointer-events:none;}
 .ctr-cbar-body{display:flex;gap:6px;height:184px;}
@@ -88,11 +83,6 @@ const CSS = `
 .ctr-cbar-ticks{display:flex;flex-direction:column;justify-content:space-between;
   color:var(--ink-600);text-align:left;}
 
-.ctr-plot{display:flex;flex-direction:column;gap:5px;padding:12px;flex:1;min-height:0;
-  border-bottom:1px solid var(--line-300);}
-.ctr-plot .cap{display:flex;justify-content:space-between;align-items:center;
-  font-weight:500;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;
-  color:var(--ink-600);}
 .ctr-plotbox{position:relative;flex:1;min-height:0;overflow:hidden;border-radius:6px;}
 /* Canvas must never derive its layout size from its own backing store, or
    width = clientWidth*dpr feeds back and the element doubles every frame. */
@@ -199,6 +189,85 @@ const CSS = `
   background:var(--paper-100);border:1px solid var(--line-300);color:var(--ink-900);
   font-family:var(--font-mono);font-size:12px;font-variant-numeric:tabular-nums;}
 .ctr-numrow input:focus{outline:none;border-color:var(--rams-500);}
+
+/* ── Collapsible chrome ───────────────────────────────────────────────────
+   Both the sidebar and every panel inside it fold away, because the two
+   things this app is actually for -- the 3-D scene and the optimisation
+   surface -- are spatial, and a fixed 372 px of chrome is 25% of a laptop
+   viewport that the geometry could be using. Collapsed state is a thin RAIL
+   rather than nothing at all: a control that vanishes completely is a control
+   the user cannot find again. */
+.ctr-rail{width:34px;flex-shrink:0;border-left:1px solid var(--line-300);
+  background:var(--surface);display:flex;flex-direction:column;align-items:center;
+  gap:12px;padding:10px 0;}
+.ctr-rail .vlabel{writing-mode:vertical-rl;font-family:var(--font-display);
+  font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--ink-600);user-select:none;}
+.ctr-icon-btn{background:none;border:0;color:var(--ink-600);cursor:pointer;
+  padding:4px;border-radius:5px;display:flex;align-items:center;justify-content:center;
+  transition:color .15s,background .15s;}
+.ctr-icon-btn:hover{color:var(--ink-900);background:var(--paper-100);}
+
+.ctr-side-hd{display:flex;align-items:center;gap:8px;padding:9px 8px 9px 15px;
+  border-bottom:1px solid var(--line-300);flex-shrink:0;background:var(--paper-100);}
+.ctr-side-hd .ttl{flex:1;font-family:var(--font-display);font-weight:500;font-size:11.5px;
+  text-transform:uppercase;letter-spacing:.05em;color:var(--ink-600);}
+
+.ctr-panel{border-bottom:1px solid var(--line-300);display:flex;flex-direction:column;
+  min-height:0;flex-shrink:0;}
+.ctr-panel-hd{display:flex;align-items:center;gap:7px;width:100%;padding:11px 14px;
+  background:none;border:0;cursor:pointer;text-align:left;
+  font-family:var(--font-display);font-weight:500;font-size:13.5px;line-height:19px;
+  color:var(--ink-900);}
+.ctr-panel-hd:hover{background:var(--paper-100);}
+.ctr-panel-hd .chev{color:var(--ink-600);flex-shrink:0;transition:transform .15s;}
+.ctr-panel:not(.open) .ctr-panel-hd .chev{transform:rotate(-90deg);}
+.ctr-panel-hd .ttl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;}
+.ctr-panel-hd .rt{flex-shrink:0;font-family:var(--font-mono);font-size:10px;
+  font-weight:400;color:var(--ink-600);}
+.ctr-panel-bd{padding:0 14px 14px;display:flex;flex-direction:column;gap:11px;min-height:0;}
+/* A plot panel claims the leftover height when open and none when shut. */
+.ctr-panel.plot.open{flex:1;}
+.ctr-panel.plot .ctr-panel-bd{flex:1;min-height:90px;}
+
+/* ── Data layers ──────────────────────────────────────────────────────────
+   A Google-Earth-style overlay switchboard: the scene is one map, and each
+   layer is an independent read on the SAME configuration. Anchored bottom
+   left over the viewport rather than docked in the sidebar, so it stays
+   reachable when the sidebar is collapsed. */
+.ctr-layers{position:absolute;z-index:14;left:14px;bottom:14px;display:flex;
+  flex-direction:column;align-items:flex-start;gap:8px;}
+.ctr-layers-btn{display:inline-flex;align-items:center;gap:7px;padding:8px 12px;
+  border-radius:8px;cursor:pointer;font-family:var(--font-display);font-weight:500;
+  font-size:12px;text-transform:uppercase;letter-spacing:.03em;
+  background:var(--surface);border:1px solid var(--line-300);color:var(--ink-900);
+  box-shadow:0 6px 20px rgba(0,0,0,.35);}
+.ctr-layers-btn:hover{border-color:var(--rams-500);}
+.ctr-layers-btn .cnt{font-family:var(--font-mono);font-size:10.5px;color:var(--rams-700);}
+.ctr-layers-card{width:296px;max-height:min(58vh,430px);overflow-y:auto;
+  border-radius:10px;background:var(--surface);border:1px solid var(--line-300);
+  box-shadow:0 14px 40px rgba(0,0,0,.5);padding-bottom:6px;}
+.ctr-layers-card .hd{display:flex;align-items:center;gap:7px;padding:11px 13px 9px;
+  border-bottom:1px solid var(--line-300);
+  font-family:var(--font-display);font-weight:500;font-size:13px;color:var(--ink-900);}
+.ctr-layers-card h3{margin:0;padding:12px 13px 4px;font-weight:500;font-size:10px;
+  text-transform:uppercase;letter-spacing:.07em;color:var(--ink-600);}
+.ctr-layer{display:flex;align-items:flex-start;gap:9px;padding:7px 13px;cursor:pointer;}
+.ctr-layer:hover{background:var(--paper-100);}
+.ctr-layer input{margin-top:3px;accent-color:var(--rams-500);flex-shrink:0;}
+.ctr-layer .nm{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-900);}
+.ctr-layer .ds{font-size:10.5px;line-height:1.5;color:var(--ink-600);margin-top:2px;}
+.ctr-layer-empty{padding:2px 13px 10px;font-size:10.5px;line-height:1.55;
+  color:var(--ink-600);font-style:italic;}
+.ctr-key{display:inline-block;width:18px;height:3px;border-radius:2px;flex-shrink:0;}
+
+/* Spec strip: what the scene is currently showing, read-only. The numbers are
+   set on the optimisation tab, so editing them here would contradict the
+   single place they are owned. */
+.ctr-spec{display:flex;flex-wrap:wrap;gap:4px 16px;}
+.ctr-spec span{font-family:var(--font-mono);font-size:10px;color:var(--ink-600);}
+.ctr-spec b{font-weight:400;color:var(--ink-900);}
 `;
 
 /* ── Runtime palette ──────────────────────────────────────────────────────
@@ -837,13 +906,33 @@ function colormap(t) {
 const DesignCtx = createContext(null);
 const useDesign = () => useContext(DesignCtx);
 
+/* Every CONFIGURED quantity in the app lives here, in one store, because the
+   workflow is "set the specification once, then read it from several views".
+   Splitting motor and hydrodynamic parameters into the propulsion tab's local
+   state (as they were) meant the same physical robot had different definitions
+   depending on which tab you were looking at, and a theme change silently
+   reset them -- the workspaces are remounted on theme to repaint their
+   canvases, and local state does not survive a remount.
+
+   What is NOT here: alpha, the motor base twist. That is not a specification,
+   it is the live actuation input the simulator drives, so it stays with the
+   view that animates it. */
 function useDesignStore() {
   // κ₁ = κ₂ = 9.4 m⁻¹ over a 150 mm overlap reproduces the λ ≈ 3.2 this view
   // used to hard-code, but now as a consequence of the geometry rather than a
   // free parameter.
   const [sim, setSim] = useState({ alphaDeg: 0, LcMm: 150, extMm: 45, k1: 9.4, k2: 9.4 });
+  const [motor, setMotor] = useState({ rpmNoLoad: 100, rpm: 70, stall: 150 });
+  const [hydro, setHydro] = useState({ finW: 8, Cd: 1.3, rho: 997, nFins: 2, area: 20, bodyCd: 0.8 });
+  // Sweep domain for the optimiser: the box it searches, not the design itself.
+  const [domain, setDomain] = useState({ logLife: 10, LcMaxMm: 150, LcLimitMm: 150, etaK: 0.05, clip: true });
   const [handoff, setHandoff] = useState(null);
+
   const patchSim = useCallback((p) => setSim((s) => ({ ...s, ...p })), []);
+  const patchMotor = useCallback((p) => setMotor((s) => ({ ...s, ...p })), []);
+  const patchHydro = useCallback((p) => setHydro((s) => ({ ...s, ...p })), []);
+  const patchDomain = useCallback((p) => setDomain((s) => ({ ...s, ...p })), []);
+
   const applyDesign = useCallback((d) => {
     // The sweep is the equal-precurvature diagonal, so a design lands in the
     // simulator as κ₁ = κ₂ = κ; λ then follows from those and L_c.
@@ -851,7 +940,9 @@ function useDesignStore() {
     setSim((s) => ({ ...s, LcMm: d.Lc * 1000, k1: k, k2: k, alphaDeg: 0 }));
     setHandoff({ kappa: d.kappa, Lc: d.Lc, lambda: d.lambda, stamp: Date.now() });
   }, []);
-  return { sim, patchSim, handoff, applyDesign };
+
+  return { sim, patchSim, motor, patchMotor, hydro, patchHydro,
+    domain, patchDomain, handoff, applyDesign };
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -915,6 +1006,74 @@ function Row({ k, v, c }) {
   return <div className="r"><span className="dim"><M>{k}</M></span><span className="mono" style={{ color: c }}>{v}</span></div>;
 }
 
+/** Collapsible section. `plot` panels stretch to fill leftover sidebar height
+ *  when open; the canvases inside re-measure their wrapper every frame, so
+ *  folding one simply stops it drawing rather than corrupting its backing
+ *  store. */
+function Panel({ title, icon, right, children, open, onToggle, plot }) {
+  return (
+    <section className={`ctr-panel${open ? ' open' : ''}${plot ? ' plot' : ''}`}>
+      <button className="ctr-panel-hd" onClick={onToggle}
+        aria-expanded={open} title={open ? 'Collapse' : 'Expand'}>
+        <ChevronDown size={13} className="chev" />
+        {icon}
+        <span className="ttl"><M>{title}</M></span>
+        {right && <span className="rt">{right}</span>}
+      </button>
+      {open && <div className="ctr-panel-bd">{children}</div>}
+    </section>
+  );
+}
+
+/** Sidebar that folds to a labelled rail. */
+function SideBar({ title, open, onToggle, scroll, children }) {
+  if (!open) {
+    return (
+      <aside className="ctr-rail">
+        <button className="ctr-icon-btn" onClick={onToggle} title={`Show ${title}`}>
+          <ChevronLeft size={16} />
+        </button>
+        <span className="vlabel">{title}</span>
+      </aside>
+    );
+  }
+  return (
+    <aside className={`ctr-side${scroll ? ' scroll' : ''}`}>
+      <div className="ctr-side-hd">
+        <span className="ttl">{title}</span>
+        <button className="ctr-icon-btn" onClick={onToggle} title={`Hide ${title}`}>
+          <ChevronRight size={16} />
+        </button>
+      </div>
+      {children}
+    </aside>
+  );
+}
+
+/** One row of the data-layer switchboard. */
+function LayerRow({ on, onChange, name, desc, swatch, disabled }) {
+  return (
+    <label className="ctr-layer" style={disabled ? { opacity: 0.45, cursor: 'default' } : undefined}>
+      <input type="checkbox" checked={on} disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)} />
+      <span>
+        <span className="nm">
+          {swatch && <i className="ctr-key" style={{ background: swatch }} />}
+          <M>{name}</M>
+        </span>
+        <span className="ds"><M>{desc}</M></span>
+      </span>
+    </label>
+  );
+}
+
+/** Keeps a set of panel open/closed flags. */
+function usePanels(initial) {
+  const [open, setOpen] = useState(initial);
+  const toggle = useCallback((k) => setOpen((o) => ({ ...o, [k]: !o[k] })), []);
+  return [open, toggle];
+}
+
 /* ═══════════════════════════════════════════════════════════════
    7 · WORKSPACE A — INTERACTIVE 3D SIMULATOR
    ═══════════════════════════════════════════════════════════════ */
@@ -925,29 +1084,43 @@ function SimulatorWorkspace() {
   const [sweeping, setSweeping] = useState(false);
   const [slow, setSlow] = useState(false);
   const [topView, setTopView] = useState(false);
-  // Which material point gets traced onto the floor. The fin tip is the
-  // hydrodynamically active end; the end of the overlap is where the sheath
-  // releases the fin, which is the point a distally-mounted flap would pivot
-  // about. Both are legitimate design references, so the choice is exposed.
-  const [traceMode, setTraceMode] = useState('off');
+  /* Data layers. Each one is an independent read on the SAME configured
+     robot, in the manner of a mapping app: the scene is the map, the layers
+     are the overlays. Categories are fixed (motion, energy) so a new overlay
+     has an obvious home.
+
+     tipTrack vs midTrack: the fin tip is the hydrodynamically active end; the
+     end of the overlap is where the sheath releases the fin, which is the
+     point a distally-mounted flap would pivot about. Both are legitimate
+     design references and both can be lit at once, which is the direct way to
+     see which one your design actually cares about. */
+  const [layers, setLayers] = useState({ tipTrack: false, midTrack: false, vectors: true });
+  const setLayer = useCallback((k, v) => setLayers((L) => ({ ...L, [k]: v })), []);
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [side, setSide] = useState(true);
+  const [panels, togglePanel] = usePanels({ energy: true, scurve: true });
   const [hud, setHud] = useState({ theta: 0, alpha: 0, kres: 0, V: 0, Vpp: 1, vel: 0, snapping: false });
 
   const P = useRef({ alpha: 0, lambda, k1, k2, Lc: LcMm / 1000, Lext: extMm / 1000,
-    sweeping: false, slow: false, trace: 'off' });
+    sweeping: false, slow: false, layers });
   useEffect(() => {
     P.current = { alpha: (alphaDeg * Math.PI) / 180, lambda, k1, k2,
-      Lc: LcMm / 1000, Lext: extMm / 1000, sweeping, slow, trace: traceMode };
-  }, [alphaDeg, lambda, k1, k2, LcMm, extMm, sweeping, slow, traceMode]);
+      Lc: LcMm / 1000, Lext: extMm / 1000, sweeping, slow, layers };
+  }, [alphaDeg, lambda, k1, k2, LcMm, extMm, sweeping, slow, layers]);
 
   const theta = useRef(0), vel = useRef(0), flash = useRef(0), subAccum = useRef(0);
   const trail = useRef([]), sweepAlpha = useRef(0);
   const mountRef = useRef(null), energyRef = useRef(null), scurveRef = useRef(null);
   const three = useRef({});
+  const clearTracks = useCallback(() => {
+    three.current.tracks?.tip.clear();
+    three.current.tracks?.mid.clear();
+  }, []);
 
   useEffect(() => {
     if (!handoff) return;
     theta.current = 0; vel.current = 0; trail.current = [];
-    three.current.trace?.clear();
+    clearTracks();
   }, [handoff?.stamp]);
 
   /* A traced curve belongs to ONE tube geometry. Changing a precurvature, the
@@ -956,7 +1129,11 @@ function SimulatorWorkspace() {
      it is cleared rather than left to accumulate into a meaningless smear.
      Base twist alpha is deliberately NOT a dependency: sweeping alpha is
      precisely what draws the path. */
-  useEffect(() => { three.current.trace?.clear(); }, [k1, k2, LcMm, extMm, traceMode]);
+  useEffect(() => { clearTracks(); }, [k1, k2, LcMm, extMm]);
+
+  // Lighting a track layer restarts it; see makeTrack().enable.
+  useEffect(() => { three.current.tracks?.tip.enable(layers.tipTrack); }, [layers.tipTrack]);
+  useEffect(() => { three.current.tracks?.mid.enable(layers.midTrack); }, [layers.midTrack]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -978,11 +1155,11 @@ function SimulatorWorkspace() {
 
   const reset = useCallback(() => {
     theta.current = 0; vel.current = 0; trail.current = []; flash.current = 0;
-    three.current.trace?.clear();
+    clearTracks();
     patchSim({ alphaDeg: 0 }); setSweeping(false); sweepAlpha.current = 0;
     setTopView(false);
     three.current.reframe?.();
-  }, [patchSim]);
+  }, [patchSim, clearTracks]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -1062,101 +1239,6 @@ function SimulatorWorkspace() {
     const robot = new THREE.Group();
     robot.rotation.x = -Math.PI / 2; robot.position.y = -60; scene.add(robot);
 
-    /* -- Motion path -----------------------------------------------------
-       Drawn as a flat RIBBON of triangles lying in the floor plane, not as a
-       THREE.Line: WebGL clamps LineBasicMaterial.linewidth to 1 px on
-       essentially every platform, so a polyline would be a hairline that
-       disappears the moment the plan view zooms out -- which is the very view
-       this trace exists to serve.
-
-       It is a child of `scene`, not of `robot`, and every sample has its Y
-       overwritten with the floor height. That makes it a true orthographic
-       PROJECTION of the tracked point onto the floor: the (x, z) ground track
-       is kept and the out-of-plane excursion is discarded, which is exactly
-       what the top-down view shows.
-
-       Colour is per-SEGMENT. The geometry is non-indexed, so the two
-       triangles of a quad own their colour and share no vertex with their
-       neighbours; a phase boundary is therefore a hard edge. Interpolating
-       across it would blur the one transition the plot is meant to expose.
-
-       Nothing decays. Every sample stays until the path is explicitly
-       cleared, so the closed loop is visible in full at any instant. */
-    const TRACE_MAX = 6000;        // segments the buffer can hold
-    const TRACE_W = 1.7;           // ribbon width, scene units (~mm)
-    const TRACE_Y = -59.55;        // just proud of the grid at y = -60
-    const TRACE_MIN_D = 0.5;       // reject sub-pixel steps: they make degenerate quads
-    const tracePos = new Float32Array(TRACE_MAX * 18);   // 6 verts x 3 floats
-    const traceCol = new Float32Array(TRACE_MAX * 18);
-    const traceGeo = new THREE.BufferGeometry();
-    traceGeo.setAttribute('position', new THREE.BufferAttribute(tracePos, 3));
-    traceGeo.setAttribute('color', new THREE.BufferAttribute(traceCol, 3));
-    traceGeo.setDrawRange(0, 0);
-    const traceMesh = new THREE.Mesh(traceGeo, new THREE.MeshBasicMaterial({
-      vertexColors: true, side: THREE.DoubleSide, transparent: true, opacity: 0.95,
-      // The path is an annotation, not a body. It stays out of the shadow pass
-      // (castShadow defaults false) and out of the depth buffer, so it can
-      // never print a second floating silhouette or z-fight with the grid.
-      depthWrite: false,
-    }));
-    traceMesh.renderOrder = 2;
-    traceMesh.frustumCulled = false;   // bounds are never recomputed as it grows
-    traceMesh.visible = false;
-    scene.add(traceMesh);
-
-    /* Tie-line: tracked point -> its footprint on the floor. */
-    const dropGeo = new THREE.BufferGeometry();
-    dropGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-    const dropLine = new THREE.Line(dropGeo, new THREE.LineBasicMaterial({
-      color: hexInt(C.dim), transparent: true, opacity: 0.45, depthWrite: false,
-    }));
-    dropLine.frustumCulled = false;
-    dropLine.visible = false;
-    scene.add(dropLine);
-    const drop = {
-      set(w) {
-        const a = dropGeo.attributes.position.array;
-        a[0] = w.x; a[1] = w.y; a[2] = w.z;
-        a[3] = w.x; a[4] = TRACE_Y; a[5] = w.z;
-        dropGeo.attributes.position.needsUpdate = true;
-        dropLine.visible = true;
-      },
-      hide() { dropLine.visible = false; },
-    };
-
-    let segN = 0, tracePrev = null;
-    const cBuild = new THREE.Color(hexInt(C.accent));
-    const cSnap = new THREE.Color(hexInt(C.unstable));
-    const trace = {
-      clear() { segN = 0; tracePrev = null; traceGeo.setDrawRange(0, 0); traceMesh.visible = false; },
-      /** `p` is a WORLD-space point; only its ground track is retained. */
-      push(p, snapping) {
-        const cx = p.x, cz = p.z;
-        if (!tracePrev) { tracePrev = [cx, cz]; return; }
-        const dx = cx - tracePrev[0], dz = cz - tracePrev[1];
-        const len = Math.hypot(dx, dz);
-        if (len < TRACE_MIN_D || segN >= TRACE_MAX) return;
-        const nx = (-dz / len) * (TRACE_W / 2), nz = (dx / len) * (TRACE_W / 2);
-        const ax = tracePrev[0], az = tracePrev[1];
-        const quad = [
-          [ax - nx, az - nz], [ax + nx, az + nz], [cx - nx, cz - nz],
-          [ax + nx, az + nz], [cx + nx, cz + nz], [cx - nx, cz - nz],
-        ];
-        const col = snapping ? cSnap : cBuild;
-        let o = segN * 18;
-        for (const q of quad) {
-          tracePos[o] = q[0]; tracePos[o + 1] = TRACE_Y; tracePos[o + 2] = q[1];
-          traceCol[o] = col.r; traceCol[o + 1] = col.g; traceCol[o + 2] = col.b;
-          o += 3;
-        }
-        segN += 1;
-        tracePrev = [cx, cz];
-        traceGeo.attributes.position.needsUpdate = true;
-        traceGeo.attributes.color.needsUpdate = true;
-        traceGeo.setDrawRange(0, segN * 6);
-        traceMesh.visible = true;
-      },
-    };
 
     /* Both tubes are OPAQUE. A metal has a skin depth of order 10 nm in the
        visible, so a 100 µm steel wall transmits nothing — a see-through metal
@@ -1208,6 +1290,125 @@ function SimulatorWorkspace() {
       res: new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 34, hexInt(C.ink), 9, 5),
     };
     robot.add(arrows.k1, arrows.k2, arrows.res);
+
+    /* -- Motion path layers ----------------------------------------------
+       Drawn as a flat RIBBON of triangles lying in the floor plane, not as a
+       THREE.Line: WebGL clamps LineBasicMaterial.linewidth to 1 px on
+       essentially every platform, so a polyline would be a hairline that
+       disappears the moment the plan view zooms out -- which is the very view
+       this trace exists to serve.
+
+       Each ribbon is a child of `scene`, not of `robot`, and every sample has
+       its Y overwritten with the floor height. That makes it a true
+       orthographic PROJECTION of the tracked point onto the floor: the (x, z)
+       ground track is kept and the out-of-plane excursion is discarded, which
+       is exactly what the plan view shows.
+
+       Colour is per-SEGMENT. The geometry is non-indexed, so the two
+       triangles of a quad own their colour and share no vertex with their
+       neighbours; a phase boundary is therefore a hard edge. Interpolating
+       across it would blur the one transition the plot is meant to expose.
+
+       Nothing decays. Every sample stays until the track is cleared, so the
+       closed loop is visible in full at any instant.
+
+       This is a FACTORY because the fin tip and the end of the overlap are now
+       independent layers that can be lit at the same time -- which is the
+       direct way to answer "which of the two do I actually need": put both on
+       the floor and compare the enclosed areas. Phase stays the primary
+       encoding (it is the physics); the two tracks are separated by ribbon
+       WIDTH, a secondary channel, so neither reading is destroyed. */
+    const TRACE_MAX = 6000;        // segments one ribbon can hold
+    const TRACE_Y = -59.55;        // just proud of the grid at y = -60
+    const TRACE_MIN_D = 0.5;       // reject sub-pixel steps: they make degenerate quads
+    const cBuild = new THREE.Color(hexInt(C.accent));
+    const cSnap = new THREE.Color(hexInt(C.unstable));
+
+    function makeTrack(width) {
+      const pos = new Float32Array(TRACE_MAX * 18);      // 6 verts x 3 floats
+      const col = new Float32Array(TRACE_MAX * 18);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      geo.setDrawRange(0, 0);
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+        vertexColors: true, side: THREE.DoubleSide, transparent: true, opacity: 0.95,
+        // The path is an annotation, not a body. It stays out of the shadow
+        // pass (castShadow defaults false) and out of the depth buffer, so it
+        // can never print a second floating silhouette or z-fight with the grid.
+        depthWrite: false,
+      }));
+      mesh.renderOrder = 2;
+      mesh.frustumCulled = false;     // bounds are never recomputed as it grows
+      mesh.visible = false;
+      scene.add(mesh);
+
+      /* Tie-line: tracked point -> its own footprint. In the perspective view
+         an elevated point and its ground projection cannot coincide on screen
+         -- that is what a projection IS -- so the correspondence is drawn
+         rather than left to be inferred. In plan view it collapses to a dot. */
+      const dGeo = new THREE.BufferGeometry();
+      dGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+      const dLine = new THREE.Line(dGeo, new THREE.LineBasicMaterial({
+        color: hexInt(C.dim), transparent: true, opacity: 0.45, depthWrite: false,
+      }));
+      dLine.frustumCulled = false; dLine.visible = false;
+      scene.add(dLine);
+
+      let n = 0, prev = null, on = false;
+      return {
+        /* Turning a layer on CLEARS it. Accumulating across an off period
+           would splice two disconnected arcs into one stroke and invent a
+           segment the tip never travelled. */
+        enable(v) {
+          on = v; n = 0; prev = null;
+          geo.setDrawRange(0, 0);
+          mesh.visible = false; dLine.visible = false;
+        },
+        clear() { n = 0; prev = null; geo.setDrawRange(0, 0); mesh.visible = false; },
+        hide() { dLine.visible = false; },
+        /** `w` is a WORLD-space point; only its ground track is retained. */
+        push(w, snapping) {
+          if (!on) return;
+          const dp = dGeo.attributes.position.array;
+          dp[0] = w.x; dp[1] = w.y; dp[2] = w.z;
+          dp[3] = w.x; dp[4] = TRACE_Y; dp[5] = w.z;
+          dGeo.attributes.position.needsUpdate = true;
+          dLine.visible = true;
+
+          const cx = w.x, cz = w.z;
+          if (!prev) { prev = [cx, cz]; return; }
+          const dx = cx - prev[0], dz = cz - prev[1];
+          const len = Math.hypot(dx, dz);
+          if (len < TRACE_MIN_D || n >= TRACE_MAX) return;
+          const nx = (-dz / len) * (width / 2), nz = (dx / len) * (width / 2);
+          const ax = prev[0], az = prev[1];
+          const quad = [
+            [ax - nx, az - nz], [ax + nx, az + nz], [cx - nx, cz - nz],
+            [ax + nx, az + nz], [cx + nx, cz + nz], [cx - nx, cz - nz],
+          ];
+          const c = snapping ? cSnap : cBuild;
+          let o = n * 18;
+          for (const q of quad) {
+            pos[o] = q[0]; pos[o + 1] = TRACE_Y; pos[o + 2] = q[1];
+            col[o] = c.r; col[o + 1] = c.g; col[o + 2] = c.b;
+            o += 3;
+          }
+          n += 1;
+          prev = [cx, cz];
+          geo.attributes.position.needsUpdate = true;
+          geo.attributes.color.needsUpdate = true;
+          geo.setDrawRange(0, n * 6);
+          mesh.visible = true;
+        },
+        dispose() {
+          geo.dispose(); mesh.material.dispose();
+          dGeo.dispose(); dLine.material.dispose();
+        },
+      };
+    }
+
+    const tracks = { tip: makeTrack(1.9), mid: makeTrack(1.0) };
 
     const frameR = () => Math.max(240, ((P.current.Lc + P.current.Lext) * 1000) * 2.0);
     const cam = { r: frameR(), phi: Math.PI / 2.35, ang: 0.9, tx: 0, ty: 0 };
@@ -1293,7 +1494,7 @@ function SimulatorWorkspace() {
     resize();
     const ro = new ResizeObserver(resize); ro.observe(mount);
 
-    three.current = { scene, camera, renderer, outer, inner, core, glow, tipOrb, arrows, matCore, matGlow, matInner, matOuter, setTop, trace, drop, robot,
+    three.current = { scene, camera, renderer, outer, inner, core, glow, tipOrb, arrows, matCore, matGlow, matInner, matOuter, setTop, tracks, robot,
       cam: () => (planOn ? ortho : camera),
       reframe: () => { cam.r = frameR(); cam.tx = 0; cam.ty = 0; applyCam(); } };
     return () => {
@@ -1302,8 +1503,7 @@ function SimulatorWorkspace() {
       el.removeEventListener('pointerup', up); el.removeEventListener('pointerleave', up);
       el.removeEventListener('wheel', wheel);
       envRT.dispose();
-      traceGeo.dispose(); traceMesh.material.dispose();
-      dropGeo.dispose(); dropLine.material.dispose();
+      tracks.tip.dispose(); tracks.mid.dispose();
       renderer.dispose();
       if (mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
     };
@@ -1632,20 +1832,15 @@ function SimulatorWorkspace() {
         T.matInner.emissiveIntensity = snapping ? 1.6 : 0;
         const tip = pts[pts.length - 1];
         const mid = pts[nOverlap];
-        if (p.trace !== 'off' && T.trace) {
+        if (T.tracks) {
           // pts live in the robot group's local frame (pitched -90 deg and
           // lifted onto the base plate), so a sample has to pass through that
           // group matrix before it means anything in floor coordinates.
-          const src = p.trace === 'overlap' ? mid : tip;
-          const w = T.robot.localToWorld(src.clone());
-          T.trace.push(w, snapping);
-          // Vertical tie-line from the tracked point down to its own footprint.
-          // In the perspective 3/4 view an elevated point and its ground
-          // projection cannot coincide on screen -- that is what a projection
-          // IS -- so the correspondence is drawn explicitly instead of left to
-          // be inferred. In plan view it collapses to a dot, as it should.
-          T.drop.set(w);
-        } else if (T.drop) T.drop.hide();
+          if (p.layers.tipTrack) T.tracks.tip.push(T.robot.localToWorld(tip.clone()), snapping);
+          else T.tracks.tip.hide();
+          if (p.layers.midTrack) T.tracks.mid.push(T.robot.localToWorld(mid.clone()), snapping);
+          else T.tracks.mid.hide();
+        }
         T.tipOrb.position.copy(tip);
         T.tipOrb.material.color.setHex(snapping ? hexInt(C.unstable) : hexInt(C.ink));
         const th = theta.current;
@@ -1656,11 +1851,16 @@ function SimulatorWorkspace() {
         ).normalize();
         const rx = (p.k1 + p.k2 * Math.cos(th)) / 2, ry = (p.k2 * Math.sin(th)) / 2;
         const rmag = Math.hypot(rx, ry);
+        // A zero-magnitude arrow still has to be hidden even when the layer is
+        // lit: pointing it somewhere arbitrary would assert a direction the
+        // curvature does not have.
+        const vec = p.layers.vectors;
         [['k1', world(1, 0), p.k1 > 0.01],
         ['k2', world(Math.cos(th), Math.sin(th)), p.k2 > 0.01],
         ['res', rmag > 1e-4 ? world(rx, ry) : new THREE.Vector3(1, 0, 0), rmag > 1e-3]]
           .forEach(([k, dir, vis]) => {
-            T.arrows[k].position.copy(mid); T.arrows[k].setDirection(dir); T.arrows[k].visible = vis;
+            T.arrows[k].position.copy(mid); T.arrows[k].setDirection(dir);
+            T.arrows[k].visible = vec && vis;
           });
         T.renderer.render(T.scene, T.cam());
       }
@@ -1683,6 +1883,8 @@ function SimulatorWorkspace() {
   }, [patchSim]);
 
   const unstable = hud.Vpp <= 0;
+  const nLayers = Object.values(layers).filter(Boolean).length;
+  const anyTrack = layers.tipTrack || layers.midTrack;
 
   return (
     <div className="col grow">
@@ -1691,25 +1893,86 @@ function SimulatorWorkspace() {
           <div className="ctr-overlay mono dim" style={{ top: 12, left: 12 }}>
             <div>drag · orbit</div><div>shift + drag · pan</div><div>scroll · zoom</div>
             <div style={{ color: topView ? C.accent : undefined }}>space · {topView ? 'exit plan view' : 'plan view'}</div>
-            {traceMode !== 'off' && !topView && (
-              <div style={{ color: C.accent }}>path drawn on floor — press space</div>
+            {anyTrack && !topView && (
+              <div style={{ color: C.accent }}>tracks drawn on floor — press space</div>
             )}
           </div>
+
+          {/* What the scene is showing. Read-only: these are owned by the
+              optimisation tab, and a second editable copy here would give the
+              same robot two definitions. */}
+          <div className="ctr-overlay" style={{ bottom: 12, right: 12, textAlign: 'right' }}>
+            <div className="ctr-spec" style={{ justifyContent: 'flex-end' }}>
+              <span>κ₁ <b>{k1.toFixed(1)}</b> m⁻¹</span>
+              <span>κ₂ <b>{k2.toFixed(1)}</b> m⁻¹</span>
+              <span><M>{'L_c'}</M> <b>{LcMm.toFixed(0)}</b> mm</span>
+              <span><M>{'L_ext'}</M> <b>{extMm.toFixed(0)}</b> mm</span>
+            </div>
+          </div>
+
           <div className="ctr-overlay mono" style={{ top: 12, right: 12, textAlign: 'right' }}>
-            <div style={{ color: C.blue }}>— outer tube κ₁</div>
-            <div style={{ color: C.sand }}>— inner tube κ₂</div>
-            <div style={{ color: C.ink }}>— resultant curvature</div>
-            {traceMode !== 'off' && (
+            {layers.vectors && (
               <>
-                <div style={{ marginTop: 6, color: C.dim }}>
-                  ground track · {traceMode === 'tip'
-                    ? 'fin tip' : <>end of overlap <M>{'L_c'}</M></>}
-                </div>
+                <div style={{ color: C.blue }}>— outer tube κ₁</div>
+                <div style={{ color: C.sand }}>— inner tube κ₂</div>
+                <div style={{ color: C.ink }}>— resultant curvature</div>
+              </>
+            )}
+            {anyTrack && (
+              <>
+                <div style={{ marginTop: 6, color: C.dim }}>ground track</div>
                 <div style={{ color: C.accent }}>— build-up (quasi-static)</div>
                 <div style={{ color: C.unstable }}>— snap (energy release)</div>
+                {layers.tipTrack && layers.midTrack && (
+                  <div className="dim" style={{ marginTop: 3 }}>wide = tip · narrow = overlap</div>
+                )}
               </>
             )}
           </div>
+
+          {/* ── Data layers ───────────────────────────────────────────────
+              Anchored over the viewport, not docked in the sidebar, so it
+              survives the sidebar being collapsed. */}
+          <div className="ctr-layers">
+            {layersOpen && (
+              <div className="ctr-layers-card">
+                <div className="hd"><Layers size={14} color={C.accent} /> Data layers</div>
+
+                <h3>Motion</h3>
+                <LayerRow on={layers.tipTrack} onChange={(v) => setLayer('tipTrack', v)}
+                  swatch={C.accent} name="Ground track · fin tip"
+                  desc="Floor projection of the distal fin tip, coloured by phase. Closed loop, never fades." />
+                <LayerRow on={layers.midTrack} onChange={(v) => setLayer('midTrack', v)}
+                  swatch={C.cyan} name="Ground track · end of overlap L_c"
+                  desc="Same projection taken where the sheath releases the fin. Light both to compare swept areas." />
+                <LayerRow on={layers.vectors} onChange={(v) => setLayer('vectors', v)}
+                  swatch={C.ink} name="Curvature vectors"
+                  desc="κ₁, κ₂ and their resultant at the end of the overlap." />
+
+                <div className="sep" />
+                <h3>Energy</h3>
+                <p className="ctr-layer-empty">
+                  No energy layers defined yet. Strain, stored torsional energy and
+                  snap-release density all map onto the backbone and belong here.
+                </p>
+
+                {anyTrack && (
+                  <>
+                    <div className="sep" />
+                    <button className="ctr-btn" style={{ margin: '4px 13px 6px', width: 'calc(100% - 26px)' }}
+                      onClick={clearTracks}>
+                      <RotateCcw size={13} /> Clear tracks
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+            <button className="ctr-layers-btn" onClick={() => setLayersOpen((v) => !v)}>
+              <Layers size={15} /> Layers
+              {nLayers > 0 && <span className="cnt">{nLayers}</span>}
+            </button>
+          </div>
+
           {handoff && (
             <div className="ctr-badge mono">
               loaded · κ {handoff.kappa.toFixed(1)} m⁻¹ · L_c {(handoff.Lc * 1000).toFixed(0)} mm
@@ -1720,25 +1983,20 @@ function SimulatorWorkspace() {
           )}
         </div>
 
-        <div className="ctr-side">
-          <div className="ctr-plot">
-            <div className="cap">
-              <span>Energy landscape</span>
-              <span className="mono t10 dim">
-                V [–] = torsion {(0.5 * ((hud.theta - hud.alpha) ** 2)).toFixed(2)}
-                {' + '}bend {(lambda * (1 - Math.cos(hud.theta))).toFixed(2)}
-              </span>
-            </div>
+        <SideBar title="Analysis" open={side} onToggle={() => setSide((v) => !v)}>
+          <Panel title="Energy landscape" plot open={panels.energy}
+            onToggle={() => togglePanel('energy')}
+            icon={<Zap size={14} color={C.gold} />}
+            right={`V = ${(0.5 * ((hud.theta - hud.alpha) ** 2)).toFixed(2)} + ${(lambda * (1 - Math.cos(hud.theta))).toFixed(2)}`}>
             <div className="ctr-plotbox"><canvas ref={energyRef} /></div>
-          </div>
-          <div className="ctr-plot" style={{ borderBottom: 0 }}>
-            <div className="cap">
-              <span>Equilibrium map</span>
-              <span className="mono t10 dim">tip twist vs base twist</span>
-            </div>
+          </Panel>
+          <Panel title="Equilibrium map" plot open={panels.scurve}
+            onToggle={() => togglePanel('scurve')}
+            icon={<Activity size={14} color={C.cyan} />}
+            right="θ vs α">
             <div className="ctr-plotbox"><canvas ref={scurveRef} /></div>
-          </div>
-        </div>
+          </Panel>
+        </SideBar>
       </div>
 
       <footer className="ctr-foot">
@@ -1751,33 +2009,14 @@ function SimulatorWorkspace() {
             title="Replay the same dynamics at 1/10 substep rate">
             <Waves size={14} /> {slow ? "Slo-mo 1/10" : "Slo-mo"}
           </button>
-          <button className={`ctr-btn${traceMode !== 'off' ? ' on' : ''}`}
-            onClick={() => setTraceMode((m) => (m === 'off' ? 'tip' : m === 'tip' ? 'overlap' : 'off'))}
-            title="Project the tracked point's ground track onto the floor. Cycles off - fin tip - end of overlap.">
-            <Spline size={14} />
-            {traceMode === 'off' ? 'Path off'
-              : traceMode === 'tip' ? 'Path · fin tip'
-                : 'Path · overlap end'}
-          </button>
-          {traceMode !== 'off' && (
-            <button className="ctr-btn" onClick={() => three.current.trace?.clear()}
-              title="Erase the accumulated ground track">
-              <RotateCcw size={14} /> Clear path
-            </button>
-          )}
         </div>
 
-        <div className="ctr-sliders">
+        {/* α is the only live control left here: it is the actuation input the
+            simulator drives, not part of the specification. Everything that
+            defines the ROBOT is configured on the optimisation tab. */}
+        <div className="ctr-sliders" style={{ gridTemplateColumns: 'minmax(0,1fr)', maxWidth: 320 }}>
           <Slider label="Motor base twist" symbol="α" value={alphaDeg} min={-360} max={360} step={1}
             unit="°" accent={C.cyan} onChange={(v) => { patchSim({ alphaDeg: v }); setSweeping(false); }} />
-          <Slider label="Overlap length" symbol="L_c" value={LcMm} min={10} max={Math.max(150, Math.ceil(LcMm / 10) * 10)} step={1}
-            unit=" mm" digits={0} accent={C.blue} onChange={(v) => patchSim({ LcMm: v })} />
-          <Slider label="Fin extension" symbol="L_ext" value={extMm} min={0} max={120} step={1}
-            unit=" mm" digits={0} accent={C.accent} onChange={(v) => patchSim({ extMm: v })} />
-          <Slider label="Outer precurvature" symbol="κ₁" value={k1} min={0} max={25} step={0.1}
-            unit=" m⁻¹" accent={C.blue} onChange={(v) => patchSim({ k1: v })} />
-          <Slider label="Inner precurvature" symbol="κ₂" value={k2} min={0} max={25} step={0.1}
-            unit=" m⁻¹" accent={C.gold} onChange={(v) => patchSim({ k2: v })} />
         </div>
 
         <div className="ctr-metrics">
@@ -1806,19 +2045,30 @@ function SimulatorWorkspace() {
 const GRID_N = 50, SURF = 105, HEIGHT = 74;
 
 function OptimizerWorkspace() {
-  const { applyDesign } = useDesign();
+  /* This tab owns the whole specification. Every configured quantity in the
+     app is edited here and read elsewhere, so there is exactly one definition
+     of the robot at any moment. */
+  const { applyDesign, sim, patchSim, motor, patchMotor, hydro, patchHydro,
+    domain, patchDomain } = useDesign();
+  const { LcMm, extMm, k1, k2 } = sim;
   // Part 6: the allowable strain must be justified by a target cycle life,
   // not hardcoded to the 8% monotonic superelastic limit — at 8% the gate is
   // inert over the whole practical κ range and the optimum just walks to the
   // corner of the parameter box.
-  const [logLife, setLogLife] = useState(10);            // log10 target cycles
-  const [LcMaxMm, setLcMaxMm] = useState(150);
   // The 150 mm ceiling was an arbitrary slider bound, not a physical limit —
   // it is now itself editable.
-  const [LcLimitMm, setLcLimitMm] = useState(150);
-  const [etaK, setEtaK] = useState(0.05);
-  const [clip, setClip] = useState(true);
+  const { logLife, LcMaxMm, LcLimitMm, etaK, clip } = domain;
+  const setLogLife = (v) => patchDomain({ logLife: v });
+  const setLcMaxMm = (v) => patchDomain({ LcMaxMm: typeof v === 'function' ? v(LcMaxMm) : v });
+  const setEtaK = (v) => patchDomain({ etaK: v });
+  const setClip = (v) => patchDomain({ clip: v });
   const [hover, setHover] = useState(null);
+  const [side, setSide] = useState(true);
+  const [panels, togglePanel] = usePanels({
+    sweet: true, design: true, motor: false, water: false, domain: false,
+    tradeoff: false, safety: false,
+  });
+  const designLambda = bifurcation(k1, k2, LcMm / 1000);
 
   const targetLife = Math.pow(10, logLife);
   const strainLimit = epsAllowFor(targetLife);
@@ -2318,12 +2568,13 @@ function OptimizerWorkspace() {
         </div>
       </div>
 
-      <div className="ctr-side scroll">
-        <div className="ctr-sec">
-          <h2><Target size={15} color={C.cyan} /> The sweet spot</h2>
+      <SideBar title="Specification" open={side} onToggle={() => setSide((v) => !v)} scroll>
+
+        <Panel title="The sweet spot" open={panels.sweet} onToggle={() => togglePanel('sweet')}
+          icon={<Target size={14} color={C.cyan} />}>
           {best && best.dE > 0 ? (
             <>
-              <div className="mono" style={{ color: '#67e8f9', fontSize: 14, lineHeight: 1.6 }}>
+              <div className="mono" style={{ color: C.cyan, fontSize: 14, lineHeight: 1.6 }}>
                 κ = {best.kappa.toFixed(2)} m⁻¹<br />
                 L_c = {(best.Lc * 1000).toFixed(0)} mm
               </div>
@@ -2333,7 +2584,7 @@ function OptimizerWorkspace() {
                 at λ = {best.lambda.toFixed(2)}.
               </p>
               <button className="ctr-btn primary" onClick={() => applyDesign(best)}>
-                <ArrowUpRight size={14} /> Load into simulator
+                <ArrowUpRight size={14} /> Adopt as current design
               </button>
             </>
           ) : (
@@ -2349,10 +2600,115 @@ function OptimizerWorkspace() {
               {analysis.pinnedK && 'Curvature sits on the fatigue ceiling — the material, not the energetics, is binding.'}
             </div>
           )}
-        </div>
+        </Panel>
 
-        <div className="ctr-sec">
-          <h2><Waves size={15} color={C.gold} /> Big snaps vs small snaps</h2>
+        {/* ── The specification catalogue ───────────────────────────────────
+            Current design first, because it is the thing the other tabs
+            render. The sweep domain is deliberately a SEPARATE group further
+            down: it bounds the search, it is not part of the robot. */}
+        <Panel title="Current design" open={panels.design} onToggle={() => togglePanel('design')}
+          icon={<Ruler size={14} color={C.blue} />}
+          right={`λ ${designLambda.toFixed(2)}`}>
+          <p className="ctr-p" style={{ fontSize: 11.5 }}>
+            The geometry every other tab renders and evaluates. λ = (k_b/k_t)·L_c²·κ₁κ₂
+            {' = '}<b style={{ color: designLambda > LAMBDA_CRIT ? C.gold : C.dim }}>{designLambda.toFixed(2)}</b>
+            {designLambda > LAMBDA_CRIT ? ' — past the fold, so it snaps.' : ' — below π²/4, so it cannot snap.'}
+          </p>
+          <Slider label="Outer precurvature" symbol="κ₁" value={k1} min={0} max={25} step={0.1}
+            unit=" m⁻¹" accent={C.blue} onChange={(v) => patchSim({ k1: v })} />
+          <Slider label="Inner precurvature" symbol="κ₂" value={k2} min={0} max={25} step={0.1}
+            unit=" m⁻¹" accent={C.gold} onChange={(v) => patchSim({ k2: v })} />
+          <Slider label="Overlap length" symbol="L_c" value={LcMm} min={10}
+            max={Math.max(150, Math.ceil(LcMm / 10) * 10)} step={1}
+            unit=" mm" digits={0} accent={C.blue} onChange={(v) => patchSim({ LcMm: v })} />
+          <Slider label="Fin extension" symbol="L_ext" value={extMm} min={0} max={120} step={1}
+            unit=" mm" digits={0} accent={C.accent} onChange={(v) => patchSim({ extMm: v })} />
+          <div className="mono t10 dim" style={{ lineHeight: 1.6 }}>
+            L_ext is the distal run past the sheath, where the fin carries its own
+            κ₂ at full magnitude. It changes the shape and the swept track, but
+            not λ — only the overlap stores the torsion that folds.
+          </div>
+        </Panel>
+
+        <Panel title="Motor" open={panels.motor} onToggle={() => togglePanel('motor')}
+          icon={<Gauge size={14} color={C.cyan} />}>
+          <Slider label="No-load speed" symbol="ω₀" value={motor.rpmNoLoad} min={10} max={300} step={1}
+            unit=" RPM" digits={0} accent={C.cyan} onChange={(v) => patchMotor({ rpmNoLoad: v })} />
+          <Slider label="Operating speed" symbol="ω" value={motor.rpm} min={1} max={299} step={1}
+            unit=" RPM" digits={0} accent={C.cyan} onChange={(v) => patchMotor({ rpm: v })} />
+          <Slider label="Stall torque" symbol="τ" value={motor.stall} min={10} max={400} step={1}
+            unit=" N·mm" digits={0} accent={C.cyan} onChange={(v) => patchMotor({ stall: v })} />
+        </Panel>
+
+        <Panel title="Water" open={panels.water} onToggle={() => togglePanel('water')}
+          icon={<Waves size={14} color={C.gold} />}>
+          <Slider label="Fin width" symbol="w" value={hydro.finW} min={2} max={25} step={0.5}
+            unit=" mm" digits={1} accent={C.gold} onChange={(v) => patchHydro({ finW: v })} />
+          <Slider label="Fin drag coeff" symbol="C_d" value={hydro.Cd} min={0.3} max={2} step={0.05}
+            unit="" accent={C.gold} onChange={(v) => patchHydro({ Cd: v })} />
+          <Slider label="Water density" symbol="ρ" value={hydro.rho} min={995} max={1030} step={1}
+            unit=" kg/m³" digits={0} accent={C.gold} onChange={(v) => patchHydro({ rho: v })} />
+          <Slider label="Fins snapping" symbol="n" value={hydro.nFins} min={1} max={4} step={1}
+            unit="" digits={0} accent={C.gold} onChange={(v) => patchHydro({ nFins: v })} />
+          <Slider label="Frontal area" symbol="A" value={hydro.area} min={4} max={100} step={1}
+            unit=" cm²" digits={0} accent={C.blue} onChange={(v) => patchHydro({ area: v })} />
+          <Slider label="Body drag coeff" symbol="C_D" value={hydro.bodyCd} min={0.2} max={1.5} step={0.05}
+            unit="" accent={C.blue} onChange={(v) => patchHydro({ bodyCd: v })} />
+        </Panel>
+
+        <Panel title="Sweep domain" open={panels.domain} onToggle={() => togglePanel('domain')}
+          icon={<Sliders size={14} color={C.dim} />}
+          right={`${GRID_N}×${GRID_N}`}>
+          <p className="ctr-p" style={{ fontSize: 11.5 }}>
+            Bounds the box the optimiser searches. These shape the surface on the
+            left; they are not properties of the robot.
+          </p>
+          <Slider label="Target cycle life" symbol="N" value={logLife} min={6} max={12} step={0.1}
+            unit="" digits={1} accent={C.red} onChange={setLogLife} />
+          <div className="mono t10 dim" style={{ marginTop: -4 }}>
+            10^{logLife.toFixed(1)} cycles → ε_allow = (10/N)^(1/5) = {strainPct.toFixed(2)} %.
+            Inverted Coffin-Manson, not the {(EPS_SUPERELASTIC * 100).toFixed(0)}% monotonic
+            superelastic limit — that one is a one-time strain, not a per-cycle gate.
+          </div>
+          <Slider label="Overlap ceiling" symbol="L_c" value={LcMaxMm}
+            min={40} max={LcLimitMm} step={5}
+            unit=" mm" digits={0} accent={C.gold} onChange={setLcMaxMm} />
+          <label className="ctr-numrow">
+            <span className="cap-label">Slider upper bound</span>
+            <input type="number" min={60} max={2000} step={10} value={LcLimitMm}
+              onChange={(e) => {
+                const v = Math.max(60, Math.min(2000, Number(e.target.value) || 60));
+                patchDomain({ LcLimitMm: v, LcMaxMm: Math.min(LcMaxMm, v) });
+              }} />
+            <span className="mono t10 dim">mm</span>
+          </label>
+          <Slider label="Hydro saturation" symbol="k_η" value={etaK} min={0.005} max={0.5} step={0.005}
+            unit="" digits={3} accent={C.blue} onChange={setEtaK} />
+          <div className="mono t10 dim" style={{ marginTop: -4, lineHeight: 1.6 }}>
+            <M>{'η_hydro = 1 − exp(−k_η · ΔE)'}</M>. Engineering placeholder — no
+            physical derivation, and not a value taken from the burst-and-coast
+            literature. RAISING it saturates η toward 1 for every snap, so the
+            score stops rewarding size and collapses onto pure round-trip
+            efficiency (λ → 3.65). LOWERING it leaves η ≈ k_η·ΔE, so the score
+            scales as ΔE²/W_in and chases larger, less efficient snaps.
+          </div>
+          <label className="ctr-check">
+            <input type="checkbox" checked={clip} onChange={(e) => setClip(e.target.checked)} />
+            <span>
+              Clip κ axis to the fatigue ceiling{' '}
+              <span className="mono dim">(κ ≤ 2ε/d₀ = {kappaCeiling.toFixed(1)} m⁻¹)</span>{' '}
+              so the surface only spans survivable designs.
+            </span>
+          </label>
+          <div className="mono t10 dim">
+            d₀ {(NITINOL.d_o * 1e3).toFixed(2)} mm · kt {(NITINOL.kt * 1e3).toFixed(2)} mN·m² ·
+            kb/kt {C_STIFF.toFixed(2)} · grid {GRID_N}×{GRID_N}
+          </div>
+        </Panel>
+
+        <Panel title="Big snaps vs small snaps" open={panels.tradeoff}
+          onToggle={() => togglePanel('tradeoff')}
+          icon={<Waves size={14} color={C.gold} />}>
           <p className="ctr-p">
             Below λ = π²/4 the energy well never folds. {analysis.sub} of {analysis.total} grid points
             sit here: the tube rotates smoothly, stores torsion, and gives it back with no impulse.
@@ -2370,19 +2726,15 @@ function OptimizerWorkspace() {
               at κ = {analysis.biggest.kappa.toFixed(1)} m⁻¹, scoring{' '}
               {grid.maxScore > 0 ? (analysis.biggest.score / grid.maxScore).toFixed(2) : '0'} against the
               optimum: motor work per revolution rises faster than usable energy, and the hydrodynamic
-              term (1 − e^−0.05ΔE) has already saturated. Past saturation, extra snap energy buys strain,
+              term (1 − e^−k_η·ΔE) has already saturated. Past saturation, extra snap energy buys strain,
               not thrust.
             </p>
           )}
-        </div>
+        </Panel>
 
-        <div className="ctr-sec">
-          <h2>
-            <ShieldAlert size={15} color="#94a3b8" /> Safety check
-            <span className="mono t10 dim" style={{ marginLeft: 'auto', fontWeight: 400 }}>
-              {hover ? 'hovered' : 'optimum'}
-            </span>
-          </h2>
+        <Panel title="Safety check" open={panels.safety} onToggle={() => togglePanel('safety')}
+          icon={<ShieldAlert size={14} color={C.dim} />}
+          right={hover ? 'hovered' : 'optimum'}>
           {focus && (
             <>
               <ZoneGauge label="Peak bending strain" value={focus.eb * 100}
@@ -2415,54 +2767,8 @@ function OptimizerWorkspace() {
               </div>
             </>
           )}
-        </div>
-
-        <div className="ctr-sec" style={{ borderBottom: 0, gap: 14 }}>
-          <h2><Sliders size={15} color="#94a3b8" /> Domain</h2>
-          <Slider label="Target cycle life" symbol="N" value={logLife} min={6} max={12} step={0.1}
-            unit="" digits={1} accent={C.red} onChange={setLogLife} />
-          <div className="field-note mono t10 dim" style={{ marginTop: -4 }}>
-            10^{logLife.toFixed(1)} cycles → ε_allow = (10/N)^(1/5) = {strainPct.toFixed(2)} %.
-            Inverted Coffin-Manson, not the {(EPS_SUPERELASTIC * 100).toFixed(0)}% monotonic
-            superelastic limit — that one is a one-time strain, not a per-cycle gate.
-          </div>
-          <Slider label="Overlap ceiling" symbol="L_c" value={LcMaxMm}
-            min={40} max={LcLimitMm} step={5}
-            unit=" mm" digits={0} accent={C.gold} onChange={setLcMaxMm} />
-          <label className="ctr-numrow">
-            <span className="cap-label">Slider upper bound</span>
-            <input type="number" min={60} max={2000} step={10} value={LcLimitMm}
-              onChange={(e) => {
-                const v = Math.max(60, Math.min(2000, Number(e.target.value) || 60));
-                setLcLimitMm(v);
-                setLcMaxMm((c) => Math.min(c, v));
-              }} />
-            <span className="mono t10 dim">mm</span>
-          </label>
-          <Slider label="Hydro saturation" symbol="k_η" value={etaK} min={0.005} max={0.5} step={0.005}
-            unit="" digits={3} accent={C.blue} onChange={setEtaK} />
-          <div className="mono t10 dim" style={{ marginTop: -4, lineHeight: 1.6 }}>
-            <M>{'η_hydro = 1 − exp(−k_η · ΔE)'}</M>. Engineering placeholder — no
-            physical derivation, and not a value taken from the burst-and-coast
-            literature. RAISING it saturates η toward 1 for every snap, so the
-            score stops rewarding size and collapses onto pure round-trip
-            efficiency (λ → 3.65). LOWERING it leaves η ≈ k_η·ΔE, so the score
-            scales as ΔE²/W_in and chases larger, less efficient snaps.
-          </div>
-          <label className="ctr-check">
-            <input type="checkbox" checked={clip} onChange={(e) => setClip(e.target.checked)} />
-            <span>
-              Clip κ axis to the fatigue ceiling{' '}
-              <span className="mono dim">(κ ≤ 2ε/d₀ = {kappaCeiling.toFixed(1)} m⁻¹)</span>{' '}
-              so the surface only spans survivable designs.
-            </span>
-          </label>
-          <div className="mono t10 dim">
-            d₀ {(NITINOL.d_o * 1e3).toFixed(2)} mm · kt {(NITINOL.kt * 1e3).toFixed(2)} mN·m² ·
-            kb/kt {C_STIFF.toFixed(2)} · grid {GRID_N}×{GRID_N}
-          </div>
-        </div>
-      </div>
+        </Panel>
+      </SideBar>
     </div>
   );
 }
@@ -2470,18 +2776,17 @@ function OptimizerWorkspace() {
 /* ═══════════════════════════════════════════════════════════════
    8b · WORKSPACE C — PROPULSION
    ═══════════════════════════════════════════════════════════════ */
+/* Read-only by design. Motor and water parameters used to be local state
+   here, which meant this tab and the optimiser could disagree about the same
+   physical robot. They now come from the shared store and are edited in one
+   place; what is left on this tab is the derived performance. */
 function PropulsionWorkspace() {
-  const { sim } = useDesign();
+  const { sim, motor, hydro } = useDesign();
   const { LcMm, k1, k2 } = sim;
   const lambda = bifurcation(k1, k2, LcMm / 1000);
   const Lc = LcMm / 1000;
-
-  const [motor, setMotor] = useState({ rpmNoLoad: 100, rpm: 70, stall: 150 });
-  const [hydro, setHydro] = useState({
-    finW: 8, Cd: 1.3, rho: 997, nFins: 2, area: 20, bodyCd: 0.8,
-  });
-  const pm = (p) => setMotor((s) => ({ ...s, ...p }));
-  const ph = (p) => setHydro((s) => ({ ...s, ...p }));
+  const [side, setSide] = useState(true);
+  const [panels, togglePanel] = usePanels({ nosnap: true, energy: true, torque: true, thrust: true, inputs: false });
 
   const R = useMemo(() => propulsion(lambda, Lc, motor, hydro), [lambda, Lc, motor, hydro]);
 
@@ -2589,79 +2894,70 @@ function PropulsionWorkspace() {
         </p>
       </div>
 
-      <div className="ctr-side scroll">
-        <div className="ctr-sec">
-          <h2><Gauge size={15} color={C.cyan} /> Motor</h2>
-          <Slider label="No-load speed" symbol="ω₀" value={motor.rpmNoLoad} min={10} max={300} step={1}
-            unit=" RPM" digits={0} accent={C.cyan} onChange={(v) => pm({ rpmNoLoad: v })} />
-          <Slider label="Operating speed" symbol="ω" value={motor.rpm} min={1} max={299} step={1}
-            unit=" RPM" digits={0} accent={C.cyan} onChange={(v) => pm({ rpm: v })} />
-          <Slider label="Stall torque" symbol="τ" value={motor.stall} min={10} max={400} step={1}
-            unit=" N·mm" digits={0} accent={C.cyan} onChange={(v) => pm({ stall: v })} />
-        </div>
-
-        <div className="ctr-sec">
-          <h2><Waves size={15} color={C.gold} /> Water</h2>
-          <Slider label="Fin width" symbol="w" value={hydro.finW} min={2} max={25} step={0.5}
-            unit=" mm" digits={1} accent={C.gold} onChange={(v) => ph({ finW: v })} />
-          <Slider label="Fin drag coeff" symbol="C_d" value={hydro.Cd} min={0.3} max={2} step={0.05}
-            unit="" accent={C.gold} onChange={(v) => ph({ Cd: v })} />
-          <Slider label="Water density" symbol="ρ" value={hydro.rho} min={995} max={1030} step={1}
-            unit=" kg/m³" digits={0} accent={C.gold} onChange={(v) => ph({ rho: v })} />
-          <Slider label="Fins snapping" symbol="n" value={hydro.nFins} min={1} max={4} step={1}
-            unit="" digits={0} accent={C.gold} onChange={(v) => ph({ nFins: v })} />
-          <Slider label="Frontal area" symbol="A" value={hydro.area} min={4} max={100} step={1}
-            unit=" cm²" digits={0} accent="#a78bfa" onChange={(v) => ph({ area: v })} />
-          <Slider label="Body drag coeff" symbol="C_D" value={hydro.bodyCd} min={0.2} max={1.5} step={0.05}
-            unit="" accent="#a78bfa" onChange={(v) => ph({ bodyCd: v })} />
-        </div>
-
+      <SideBar title="Performance" open={side} onToggle={() => setSide((v) => !v)} scroll>
         {!R.snapCapable ? (
-          <div className="ctr-sec">
-            <h2><ShieldAlert size={15} color={C.unstable} /> No snap</h2>
+          <Panel title="No snap" open={panels.nosnap} onToggle={() => togglePanel('nosnap')}
+            icon={<ShieldAlert size={14} color={C.unstable} />}>
             <p className="ctr-p">
               λ = {lambda.toFixed(2)} is below π²/4, so the tip tracks the motor smoothly and
-              never releases an impulse. Raise κ₁, κ₂ or L_c in the simulator tab — λ is their
-              product, so a straight tube on either side gives zero thrust.
+              never releases an impulse. Raise κ₁, κ₂ or L_c under <b>Current design</b> on the
+              optimisation tab — λ is their product, so a straight tube on either side gives
+              zero thrust.
             </p>
-          </div>
+          </Panel>
         ) : (
           <>
-            <div className="ctr-sec">
-              <h2><Zap size={15} color={C.gold} /> Energy budget</h2>
+            <Panel title="Energy budget" open={panels.energy} onToggle={() => togglePanel('energy')}
+              icon={<Zap size={14} color={C.gold} />}>
               <Row k="Released per snap" v={`${mJ(R.released)} mJ`} c={C.gold} />
-              <Row k="Motor work per rev" v={`${mJ(R.motorPerRev)} mJ`} c="#94a3b8" />
+              <Row k="Motor work per rev" v={`${mJ(R.motorPerRev)} mJ`} c={C.dim} />
               <Row k="Margin [%]" v={`${(R.energyMargin * 100).toFixed(0)} %`}
                 c={pill(R.energyMargin >= 1.15, R.energyMargin >= 1)} />
               <Row k="Tip jump Δθ" v={`${((R.dTip * 180) / Math.PI).toFixed(0)}°`} c={C.cyan} />
-            </div>
+            </Panel>
 
-            <div className="ctr-sec">
-              <h2><Activity size={15} color={C.cyan} /> Torque check</h2>
-              <Row k="Peak reaction" v={`${(R.peakTorque * 1000).toFixed(1)} N·mm`} c="#94a3b8" />
-              <Row k="Available @ ω" v={`${(R.avail * 1000).toFixed(1)} N·mm`} c="#94a3b8" />
+            <Panel title="Torque check" open={panels.torque} onToggle={() => togglePanel('torque')}
+              icon={<Activity size={14} color={C.cyan} />}>
+              <Row k="Peak reaction" v={`${(R.peakTorque * 1000).toFixed(1)} N·mm`} c={C.dim} />
+              <Row k="Available @ ω" v={`${(R.avail * 1000).toFixed(1)} N·mm`} c={C.dim} />
               <Row k="Margin [–]" v={`${R.torqueMargin.toFixed(2)}×`}
                 c={pill(R.torqueMargin >= 1.3, R.torqueMargin >= 1)} />
               <p className="ctr-p" style={{ marginTop: 4 }}>
                 Quasi-static. Rotor inertia can carry a brief deficit, but a sustained one
                 bogs the motor down and delays the snap.
               </p>
-            </div>
+            </Panel>
 
-            <div className="ctr-sec">
-              <h2><ArrowUpRight size={15} color={C.green} /> Thrust</h2>
+            <Panel title="Thrust" open={panels.thrust} onToggle={() => togglePanel('thrust')}
+              icon={<ArrowUpRight size={14} color={C.green} />}>
               <Row k="Jet velocity" v={`${(R.vJet * 100).toFixed(1)} cm/s`} c={C.cyan} />
-              <Row k="Avg thrust power" v={`${(R.Pthrust * 1000).toFixed(0)} mW`} c="#94a3b8" />
+              <Row k="Avg thrust power" v={`${(R.Pthrust * 1000).toFixed(0)} mW`} c={C.dim} />
               <Row k="Cruise speed" v={`${(R.vCruise * 100).toFixed(1)} cm/s`} c={C.green} />
               <p className="ctr-p" style={{ marginTop: 4 }}>
                 Cruise balances average thrust power against ½ρC_D A v³. The model is
                 frictionless and ignores superelastic hysteresis loss and added mass, so
                 treat every number here as an optimistic upper bound.
               </p>
-            </div>
+            </Panel>
           </>
         )}
-      </div>
+
+        {/* The inputs behind the numbers above, shown so this tab is readable
+            on its own — but edited on the optimisation tab, which owns them. */}
+        <Panel title="Inputs in force" open={panels.inputs} onToggle={() => togglePanel('inputs')}
+          icon={<Sliders size={14} color={C.dim} />} right="read-only">
+          <div className="ctr-spec" style={{ flexDirection: 'column', gap: 3 }}>
+            <span>κ₁ <b>{k1.toFixed(1)}</b> m⁻¹ · κ₂ <b>{k2.toFixed(1)}</b> m⁻¹ · L_c <b>{LcMm.toFixed(0)}</b> mm</span>
+            <span>ω₀ <b>{motor.rpmNoLoad}</b> RPM · ω <b>{motor.rpm}</b> RPM · τ <b>{motor.stall}</b> N·mm</span>
+            <span>w <b>{hydro.finW}</b> mm · C_d <b>{hydro.Cd}</b> · ρ <b>{hydro.rho}</b> kg/m³ · n <b>{hydro.nFins}</b></span>
+            <span>A <b>{hydro.area}</b> cm² · C_D <b>{hydro.bodyCd}</b></span>
+          </div>
+          <p className="ctr-p" style={{ fontSize: 11.5 }}>
+            Change any of these under <b>Motor</b>, <b>Water</b> or <b>Current design</b> on the
+            optimisation tab.
+          </p>
+        </Panel>
+      </SideBar>
     </div>
   );
 }
