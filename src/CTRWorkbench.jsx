@@ -1085,7 +1085,7 @@ function usePanels(initial) {
    7 · WORKSPACE A — INTERACTIVE 3D SIMULATOR
    ═══════════════════════════════════════════════════════════════ */
 function SimulatorWorkspace() {
-  const { sim, patchSim, handoff, layers, patchLayers } = useDesign();
+  const { sim, patchSim, handoff, layers, patchLayers, themeTick } = useDesign();
   const { alphaDeg, LcMm, extMm, k1, k2 } = sim;
   const lambda = bifurcation(k1, k2, LcMm / 1000);
   const [sweeping, setSweeping] = useState(false);
@@ -1158,6 +1158,11 @@ function SimulatorWorkspace() {
   }, []);
 
   useEffect(() => { three.current.setTop?.(topView); }, [topView]);
+
+  /* Repaint the scene for the new palette. The 2-D plots need no equivalent:
+     they are redrawn from scratch every animation frame, so they pick the new
+     tokens up on their own. */
+  useEffect(() => { if (themeTick) three.current.restyle?.(); }, [themeTick]);
 
   const reset = useCallback(() => {
     theta.current = 0; vel.current = 0; trail.current = []; flash.current = 0;
@@ -1333,6 +1338,12 @@ function SimulatorWorkspace() {
     function makeTrack(width) {
       const pos = new Float32Array(TRACE_MAX * 18);      // 6 verts x 3 floats
       const col = new Float32Array(TRACE_MAX * 18);
+      /* Which phase each segment was drawn in. The colour buffer alone cannot
+         answer that after the fact -- it holds resolved RGB, and the palette
+         those came from is gone once the theme changes. Keeping the phase
+         means an existing track can be RE-coloured for the new theme instead
+         of being discarded. 1 byte per segment. */
+      const phase = new Uint8Array(TRACE_MAX);
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
       geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
@@ -1373,6 +1384,17 @@ function SimulatorWorkspace() {
         },
         clear() { n = 0; prev = null; geo.setDrawRange(0, 0); mesh.visible = false; },
         hide() { dLine.visible = false; },
+        /** Repaint an already-drawn track in the current palette. */
+        restyle() {
+          for (let i = 0; i < n; i++) {
+            const c = phase[i] ? cSnap : cBuild;
+            for (let o = i * 18; o < (i + 1) * 18; o += 3) {
+              col[o] = c.r; col[o + 1] = c.g; col[o + 2] = c.b;
+            }
+          }
+          if (n > 0) geo.attributes.color.needsUpdate = true;
+          dLine.material.color.setHex(hexInt(C.dim));
+        },
         /** `w` is a WORLD-space point; only its ground track is retained. */
         push(w, snapping) {
           if (!on) return;
@@ -1394,6 +1416,7 @@ function SimulatorWorkspace() {
             [ax + nx, az + nz], [cx + nx, cz + nz], [cx - nx, cz - nz],
           ];
           const c = snapping ? cSnap : cBuild;
+          phase[n] = snapping ? 1 : 0;
           let o = n * 18;
           for (const q of quad) {
             pos[o] = q[0]; pos[o + 1] = TRACE_Y; pos[o + 2] = q[1];
@@ -1428,6 +1451,31 @@ function SimulatorWorkspace() {
        of how many times this effect fires or in what order. */
     tracks.tip.enable(P.current.layers.tipTrack);
     tracks.mid.enable(P.current.layers.midTrack);
+
+    /* Re-read the palette into every scene object whose colour came from a
+       token. Materials are mutated in place -- nothing is rebuilt except the
+       grid, whose colours three.js bakes into vertex attributes at
+       construction and offers no setter for. */
+    let gridHelper = grid;
+    const restyle = () => {
+      scene.background = new THREE.Color(C.bg);
+      planFog.color.setHex(hexInt(C.bg));
+      matGlow.color.setHex(hexInt(C.cyan));
+      arrows.k1.setColor(new THREE.Color(hexInt(C.blue)));
+      arrows.k2.setColor(new THREE.Color(hexInt(C.sand)));
+      arrows.res.setColor(new THREE.Color(hexInt(C.ink)));
+      // Shared by both tracks, so update before asking either to repaint.
+      cBuild.setHex(hexInt(C.accent));
+      cSnap.setHex(hexInt(C.unstable));
+      tracks.tip.restyle(); tracks.mid.restyle();
+
+      scene.remove(gridHelper);
+      gridHelper.geometry.dispose(); gridHelper.material.dispose();
+      gridHelper = new THREE.GridHelper(400, 20, hexInt(C.dim), hexInt(C.panel));
+      gridHelper.position.y = -60;
+      gridHelper.material.transparent = true; gridHelper.material.opacity = 0.18;
+      scene.add(gridHelper);
+    };
 
     const frameR = () => Math.max(240, ((P.current.Lc + P.current.Lext) * 1000) * 2.0);
     const cam = { r: frameR(), phi: Math.PI / 2.35, ang: 0.9, tx: 0, ty: 0 };
@@ -1513,7 +1561,7 @@ function SimulatorWorkspace() {
     resize();
     const ro = new ResizeObserver(resize); ro.observe(mount);
 
-    three.current = { scene, camera, renderer, outer, inner, core, glow, tipOrb, arrows, matCore, matGlow, matInner, matOuter, setTop, tracks, robot,
+    three.current = { scene, camera, renderer, outer, inner, core, glow, tipOrb, arrows, matCore, matGlow, matInner, matOuter, setTop, tracks, robot, restyle,
       cam: () => (planOn ? ortho : camera),
       reframe: () => { cam.r = frameR(); cam.tx = 0; cam.ty = 0; applyCam(); } };
     return () => {
@@ -1523,6 +1571,7 @@ function SimulatorWorkspace() {
       el.removeEventListener('wheel', wheel);
       envRT.dispose();
       tracks.tip.dispose(); tracks.mid.dispose();
+      gridHelper.geometry.dispose(); gridHelper.material.dispose();
       renderer.dispose();
       if (mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
     };
@@ -2068,7 +2117,7 @@ function OptimizerWorkspace() {
      app is edited here and read elsewhere, so there is exactly one definition
      of the robot at any moment. */
   const { applyDesign, sim, patchSim, motor, patchMotor, hydro, patchHydro,
-    domain, patchDomain } = useDesign();
+    domain, patchDomain, themeTick } = useDesign();
   const { LcMm, extMm, k1, k2 } = sim;
   // Part 6: the allowable strain must be justified by a target cycle life,
   // not hardcoded to the 8% monotonic superelastic limit — at 8% the gate is
@@ -2105,6 +2154,7 @@ function OptimizerWorkspace() {
   const mountRef = useRef(null), tipRef = useRef(null), three = useRef({});
   const gridRef = useRef(grid);
   useEffect(() => { gridRef.current = grid; }, [grid]);
+  useEffect(() => { if (themeTick) three.current.restyle?.(); }, [themeTick]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -2161,6 +2211,28 @@ function OptimizerWorkspace() {
       new THREE.LineBasicMaterial({ color: hexInt(C.accent), transparent: true, opacity: 0.5 }));
     scene.add(markBest, markHover, stem);
 
+    /* Palette refresh for everything built once at mount. The surface, the
+       contour paths and the axis labels are rebuilt by the grid effect (which
+       also runs on themeTick), so they are not touched here. */
+    let floorGrid = floor;
+    const restyle = () => {
+      scene.background = new THREE.Color(C.bg);
+      wire.material.color.setHex(hexInt(C.dim));
+      onsetMat.color.setHex(hexInt(C.green));
+      limitMat.color.setHex(hexInt(C.unstable));
+      markBest.material.color.setHex(hexInt(C.accent));
+      markHover.material.color.setHex(hexInt(C.ink));
+      stem.material.color.setHex(hexInt(C.accent));
+      // GridHelper bakes its two colours into vertex attributes and exposes no
+      // setter, so it is the one object that has to be rebuilt.
+      scene.remove(floorGrid);
+      floorGrid.geometry.dispose(); floorGrid.material.dispose();
+      floorGrid = new THREE.GridHelper(SURF * 2, 14, hexInt(C.dim), hexInt(C.panel));
+      floorGrid.position.y = -1;
+      floorGrid.material.transparent = true; floorGrid.material.opacity = 0.16;
+      scene.add(floorGrid);
+    };
+
     const cam = { r: 500, phi: 1.0, ang: 0.86 + Math.PI + 0.22 };
     const applyCam = () => {
       camera.position.set(
@@ -2204,7 +2276,7 @@ function OptimizerWorkspace() {
     resize();
     const ro = new ResizeObserver(resize); ro.observe(mount);
 
-    three.current = { scene, camera, renderer, surface, wire, onsetLine, limitLine, onsetMat, limitMat, axes, markBest, markHover, stem };
+    three.current = { scene, camera, renderer, surface, wire, onsetLine, limitLine, onsetMat, limitMat, axes, markBest, markHover, stem, restyle };
 
     let raf;
     const loop = () => {
@@ -2512,7 +2584,10 @@ function OptimizerWorkspace() {
       T.stem.geometry.dispose();
       T.stem.geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, 0, z), new THREE.Vector3(x, y + 4, z)]);
     } else T.markBest.visible = false;
-  }, [grid, strainLimit]);
+    // themeTick: the surface's vertex colours, the contour tubes and every
+    // axis label are built from the palette here, so a theme change has to
+    // rerun this the same way a new grid does.
+  }, [grid, strainLimit, themeTick]);
 
   const analysis = useMemo(() => {
     const { cells } = grid;
@@ -2804,7 +2879,7 @@ function OptimizerWorkspace() {
    physical robot. They now come from the shared store and are edited in one
    place; what is left on this tab is the derived performance. */
 function PropulsionWorkspace() {
-  const { sim, motor, hydro } = useDesign();
+  const { sim, motor, hydro, themeTick } = useDesign();
   const { LcMm, k1, k2 } = sim;
   const lambda = bifurcation(k1, k2, LcMm / 1000);
   const Lc = LcMm / 1000;
@@ -2897,7 +2972,7 @@ function PropulsionWorkspace() {
     ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = C.sand; ctx.fillText('■ α increasing', pad.l + 8, pad.t + 12);
     ctx.fillStyle = C.blue; ctx.fillText('■ α decreasing', pad.l + 96, pad.t + 12);
-  }, [R]);
+  }, [R, themeTick]);          // themeTick: the plot is drawn in palette colours
 
   const mJ = (j) => (j * 1000).toFixed(1);
   const pill = (ok, warn) => (ok ? C.green : warn ? C.gold : C.unstable);
@@ -2995,11 +3070,22 @@ export default function CTRWorkbench() {
   // component defaults). The token file supports both, so the choice is a
   // default rather than a lock-in.
   const [theme, setTheme] = useState('dark');
-  const [ready, setReady] = useState(0);
+  /* Bumped after the tokens are re-read, to tell each workspace to RESTYLE
+     itself. It deliberately does not key the workspaces any more.
+
+     Remounting them was the old way to repaint after a theme change, and it
+     worked, but a remount destroys the WebGL context along with everything
+     accumulated in it: the running animation, the integrator state, and every
+     ground-track segment drawn so far. Changing the colour of a surface is
+     not a reason to throw away the physics being displayed on it. Each scene
+     now re-reads the palette and updates its own materials in place. */
+  const [themeTick, setThemeTick] = useState(0);
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    // getComputedStyle here forces the style recalc, so the tokens read below
+    // are the NEW theme's, not the outgoing one's.
     syncTokens();
-    setReady((n) => n + 1);      // force a repaint of the canvases and scenes
+    setThemeTick((n) => n + 1);
   }, [theme]);
   useEffect(() => { if (store.handoff) setTab('sim'); }, [store.handoff?.stamp]);
 
@@ -3010,7 +3096,7 @@ export default function CTRWorkbench() {
   ];
 
   return (
-    <DesignCtx.Provider value={store}>
+    <DesignCtx.Provider value={{ ...store, themeTick }}>
       <style>{CSS}</style>
       <div className="ctr">
         <header className="ctr-hdr">
@@ -3034,9 +3120,9 @@ export default function CTRWorkbench() {
             </button>
           </div>
         </header>
-        {tab === 'sim' && <SimulatorWorkspace key={`sim${ready}`} />}
-        {tab === 'opt' && <OptimizerWorkspace key={`opt${ready}`} />}
-        {tab === 'prop' && <PropulsionWorkspace key={`prop${ready}`} />}
+        {tab === 'sim' && <SimulatorWorkspace />}
+        {tab === 'opt' && <OptimizerWorkspace />}
+        {tab === 'prop' && <PropulsionWorkspace />}
       </div>
     </DesignCtx.Provider>
   );
