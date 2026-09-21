@@ -931,7 +931,7 @@ function useDesignStore() {
   // on a theme switch (key={`${tab}${ready}`}, so the canvases and WebGL
   // scenes repaint), and local state does not survive its component
   // unmounting — a theme toggle was silently switching every layer back off.
-  const [layers, setLayers] = useState({ tipTrack: false, midTrack: false, vectors: true });
+  const [layers, setLayers] = useState({ tipTrack: false, midTrack: false, vectors: true, compass: false, headingUp: false });
   const [handoff, setHandoff] = useState(null);
 
   const patchSim = useCallback((p) => setSim((s) => ({ ...s, ...p })), []);
@@ -1118,12 +1118,15 @@ function SimulatorWorkspace() {
   }, [alphaDeg, lambda, k1, k2, LcMm, extMm, sweeping, slow, layers]);
 
   const theta = useRef(0), vel = useRef(0), flash = useRef(0), subAccum = useRef(0);
+  const snapEv = useRef(null), lastTip = useRef(null);   // in-flight snap, for the compass
   const trail = useRef([]), sweepAlpha = useRef(0);
   const mountRef = useRef(null), energyRef = useRef(null), scurveRef = useRef(null);
   const three = useRef({});
   const clearTracks = useCallback(() => {
     three.current.tracks?.tip.clear();
     three.current.tracks?.mid.clear();
+    three.current.compass?.clear();
+    snapEv.current = null;
   }, []);
 
   useEffect(() => {
@@ -1143,6 +1146,9 @@ function SimulatorWorkspace() {
   // Lighting a track layer restarts it; see makeTrack().enable.
   useEffect(() => { three.current.tracks?.tip.enable(layers.tipTrack); }, [layers.tipTrack]);
   useEffect(() => { three.current.tracks?.mid.enable(layers.midTrack); }, [layers.midTrack]);
+  useEffect(() => { three.current.compass?.setVisible(layers.compass); }, [layers.compass]);
+  useEffect(() => { three.current.setHeadingUp?.(layers.compass && layers.headingUp); },
+    [layers.compass, layers.headingUp]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -1444,6 +1450,96 @@ function SimulatorWorkspace() {
     }
 
     const tracks = { tip: makeTrack(1.9), mid: makeTrack(1.0) };
+
+    /* ── Snap compass ──────────────────────────────────────────────────
+       Every snap is recorded as a vector: direction = the fin tip's
+       displacement over the release, projected on the floor; magnitude = the
+       elastic energy that release gave up, dV*(k_t/L_c), the same E_snap the
+       optimiser plots. The bold arrow is their sum. Alignment = |sum| / sum
+       of magnitudes: 1 means every snap pushed the same way, less means
+       energy went sideways. This is what "is the thrust all going forward"
+       looks like as a number.
+
+       Direction convention follows the request: the arrow points the way the
+       FIN moves. The reaction on the body is the reverse.
+
+       Arrows are flat triangles on the floor, like the tracks, for the same
+       reason: a 1 px line is not legible from the plan view this exists to
+       serve. They fade edge-on with the tracks, being floor figures too. */
+    const snaps = [];                          // [{dx, dz, E}]  E in J
+    const net = new THREE.Vector2(0, 0);
+    let sumE = 0;
+    const compassGroup = new THREE.Group();
+    compassGroup.visible = false;
+    scene.add(compassGroup);
+    // depthTest off: these are annotations and must read over the model. In
+    // plan view the fin at rest lies along the very direction it snaps, and
+    // would otherwise sit exactly on top of the net arrow.
+    const arrowMat = (opacity) => new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity, side: THREE.DoubleSide,
+      depthWrite: false, depthTest: false, toneMapped: false,
+    });
+    const eachMesh = new THREE.Mesh(new THREE.BufferGeometry(), arrowMat(0.55));
+    const netMesh = new THREE.Mesh(new THREE.BufferGeometry(), arrowMat(0.95));
+    eachMesh.renderOrder = 3; netMesh.renderOrder = 4;
+    eachMesh.frustumCulled = false; netMesh.frustumCulled = false;
+    compassGroup.add(eachMesh, netMesh);
+
+    const COMPASS_MAX = 88;                    // longest arrow, scene units
+    const flatArrow = (out, x, z, len, w) => {
+      const L = Math.hypot(x, z);
+      if (L < 1e-9 || len < 0.5) return;
+      const ux = x / L, uz = z / L, px = -uz, pz = ux;
+      const head = Math.min(len * 0.45, w * 3.4), sh = Math.max(0, len - head);
+      const hw = w / 2, hh = w * 1.7, Y = TRACE_Y + 0.15;
+      out.push(
+        -px * hw, Y, -pz * hw,  px * hw, Y, pz * hw,  ux * sh + px * hw, Y, uz * sh + pz * hw,
+        -px * hw, Y, -pz * hw,  ux * sh + px * hw, Y, uz * sh + pz * hw,  ux * sh - px * hw, Y, uz * sh - pz * hw,
+        ux * sh - px * hh, Y, uz * sh - pz * hh,  ux * sh + px * hh, Y, uz * sh + pz * hh,  ux * len, Y, uz * len,
+      );
+    };
+    const setGeo = (mesh, arr) => {
+      mesh.geometry.dispose();
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+      mesh.geometry = g;
+    };
+    const rebuildCompass = () => {
+      const big = Math.max(net.length(), ...snaps.map((q) => q.E), 1e-12);
+      const k = COMPASS_MAX / big;
+      const each = [], sum = [];
+      snaps.forEach((q) => flatArrow(each, q.dx, q.dz, q.E * k, 0.9));
+      flatArrow(sum, net.x, net.y, net.length() * k, 2.6);
+      setGeo(eachMesh, each); setGeo(netMesh, sum);
+    };
+    const compass = {
+      add(q) {
+        snaps.push(q);
+        // Unit direction times energy: the displacement's LENGTH carries no
+        // information here, only its bearing does.
+        const L = Math.hypot(q.dx, q.dz);
+        net.x += (q.dx / L) * q.E; net.y += (q.dz / L) * q.E; sumE += q.E;
+        rebuildCompass();
+      },
+      clear() { snaps.length = 0; net.set(0, 0); sumE = 0; rebuildCompass(); },
+      setVisible(v) { compassGroup.visible = v; },
+      setFade(kf) { eachMesh.material.opacity = 0.55 * kf; netMesh.material.opacity = 0.95 * kf; },
+      restyle() {
+        eachMesh.material.color.setHex(hexInt(C.dim));
+        netMesh.material.color.setHex(hexInt(C.gold));
+      },
+      /** For the HUD: |net| in J, alignment |net|/sumE, count, bearing (deg, 0 = +X, CCW toward -Z... i.e. atan2(-z, x)). */
+      stats: () => ({ mag: net.length(), align: sumE > 0 ? net.length() / sumE : 0, n: snaps.length,
+        bearing: net.length() > 1e-9 ? (Math.atan2(-net.y, net.x) * 180) / Math.PI : null }),
+      /** Unit heading of the net vector on the floor, or null. */
+      heading: () => (net.length() > 1e-9 ? net.clone().normalize() : null),
+      dispose() {
+        eachMesh.geometry.dispose(); netMesh.geometry.dispose();
+        eachMesh.material.dispose(); netMesh.material.dispose();
+      },
+    };
+    compass.restyle();
+    rebuildCompass();
     /* Seed each track's on/off state from the store HERE, synchronously at
        creation, rather than leaving it to the sibling `enable` effects below.
        Those effects only fire when layers.tipTrack/midTrack CHANGE, so on a
@@ -1457,6 +1553,7 @@ function SimulatorWorkspace() {
        of how many times this effect fires or in what order. */
     tracks.tip.enable(P.current.layers.tipTrack);
     tracks.mid.enable(P.current.layers.midTrack);
+    compass.setVisible(!!P.current.layers.compass);
 
     /* Re-read the palette into every scene object whose colour came from a
        token. Materials are mutated in place -- nothing is rebuilt except the
@@ -1474,6 +1571,7 @@ function SimulatorWorkspace() {
       cBuild.setHex(hexInt(C.accent));
       cSnap.setHex(hexInt(C.unstable));
       tracks.tip.restyle(); tracks.mid.restyle();
+      compass.restyle();
       styleCube();
 
       scene.remove(gridHelper);
@@ -1501,10 +1599,31 @@ function SimulatorWorkspace() {
        axis follows from it, and panning has to use both so the scene still
        follows the mouse when the view is turned. */
     const planUp = new THREE.Vector3(0, 0, -1), planRight = new THREE.Vector3(1, 0, 0);
+    let planQ = 0;
     const snapHeading = () => Math.round(cam.ang / (Math.PI / 2)) * (Math.PI / 2);
     const setPlanHeading = (q) => {
+      planQ = q;
       planUp.set(-Math.sin(q), 0, -Math.cos(q));
       planRight.set(Math.cos(q), 0, -Math.sin(q));       // = (-Y) x up
+    };
+    /* Compass "heading-up" mode. With it on, the plan view turns so the net
+       snap vector points screen-right; with it off, the plan view rests on
+       the nearest cardinal heading (north-up). Either way the heading eases
+       rather than jumps, since the net vector moves a little at every snap. */
+    // Seeded from the store for the same reason the tracks are (see above).
+    let headingUp = !!(P.current.layers.compass && P.current.layers.headingUp);
+    const setHeadingUp = (v) => { headingUp = v; };
+    const steerPlan = (dt) => {
+      if (!planOn) return;
+      const n = headingUp ? compass.heading() : null;
+      // planRight = (cos q, -sin q) must equal n  =>  q = atan2(-n.z, n.x)
+      const target = n ? Math.atan2(-n.y, n.x) : Math.round(planQ / (Math.PI / 2)) * (Math.PI / 2);
+      let d = target - planQ;
+      d = Math.atan2(Math.sin(d), Math.cos(d));            // shortest way round
+      // Exponential approach never quite arrives; land it once within 0.2 deg.
+      if (Math.abs(d) < 0.0035) { if (d !== 0) { setPlanHeading(target); applyCam(); } return; }
+      setPlanHeading(planQ + d * Math.min(1, dt / 0.25));
+      applyCam();
     };
     const applyCam = () => {
       camera.position.set(
@@ -1758,9 +1877,11 @@ function SimulatorWorkspace() {
       const elev = Math.abs(Math.PI / 2 - cam.phi);       // above or below the floor
       const k = THREE.MathUtils.smoothstep(elev, 0.03, 0.22);
       tracks.tip.setFade(k); tracks.mid.setFade(k);
+      compass.setFade(k);
     };
     const tick = (dt) => {
       trackFade();
+      steerPlan(dt);
       if (!tween) return;
       tween.t = Math.min(1, tween.t + dt / 0.3);
       const e = 1 - Math.pow(1 - tween.t, 3);
@@ -1819,7 +1940,7 @@ function SimulatorWorkspace() {
     resize();
     const ro = new ResizeObserver(resize); ro.observe(mount);
 
-    three.current = { scene, camera, renderer, outer, inner, core, glow, tipOrb, arrows, matCore, matGlow, matInner, matOuter, setTop, tracks, robot, restyle, renderCube, tick, setCubeVisible,
+    three.current = { scene, camera, renderer, outer, inner, core, glow, tipOrb, arrows, matCore, matGlow, matInner, matOuter, setTop, tracks, robot, restyle, renderCube, tick, setCubeVisible, compass, setHeadingUp,
       cam: () => (planOn ? ortho : camera),
       reframe: () => { cam.r = frameR(); cam.tx = 0; cam.ty = 0; applyCam(); } };
     return () => {
@@ -1829,6 +1950,7 @@ function SimulatorWorkspace() {
       el.removeEventListener('wheel', wheel);
       envRT.dispose();
       tracks.tip.dispose(); tracks.mid.dispose();
+      compass.dispose();
       facets.forEach((m) => { m.geometry.dispose(); m.material.dispose(); });
       cubeLines.forEach((l) => { l.geometry.dispose(); l.material.dispose(); });
       labelCanvases.forEach(([, tex]) => tex.dispose());
@@ -2141,6 +2263,16 @@ function SimulatorWorkspace() {
       if (!wrapped && p.lambda > LAMBDA_CRIT && rate > SNAP_THRESHOLD) flash.current = 0.45;
       flash.current = Math.max(0, flash.current - dt);
       const snapping = flash.current > 0;
+      /* Snap bookkeeping for the compass. A snap runs from the frame the
+         rate first crosses the threshold to the frame the flash timer
+         expires; its energy is the drop in V between those two states, its
+         direction the tip's floor displacement between them. The flash
+         timer holds 0.45 s past the last fast frame, so a little
+         quasi-static creep rides along at the end -- small, and consistent
+         with what the rest of the app already calls "the snap". */
+      if (snapping && !snapEv.current) {
+        snapEv.current = { th: before, pos: lastTip.current ? lastTip.current.clone() : null };
+      }
 
       trail.current.push([theta.current, energy(theta.current, a, p.lambda)]);
       if (trail.current.length > 26) trail.current.shift();
@@ -2161,11 +2293,25 @@ function SimulatorWorkspace() {
         T.matInner.emissiveIntensity = snapping ? 1.6 : 0;
         const tip = pts[pts.length - 1];
         const mid = pts[nOverlap];
+        const tipW = T.robot.localToWorld(tip.clone());
+        if (snapEv.current && !snapEv.current.pos) snapEv.current.pos = tipW.clone();
+        if (!snapping && snapEv.current) {
+          const ev = snapEv.current; snapEv.current = null;
+          if (ev.pos && p.lambda > LAMBDA_CRIT) {
+            const dE = energy(ev.th, a, p.lambda) - energy(theta.current, a, p.lambda);
+            const dx = tipW.x - ev.pos.x, dz = tipW.z - ev.pos.z;
+            // Physical scaling as in the optimiser: E_snap = dV * k_t / L_c.
+            if (dE > 1e-6 && Math.hypot(dx, dz) > 0.5) {
+              T.compass?.add({ dx, dz, E: dE * NITINOL.kt / p.Lc });
+            }
+          }
+        }
+        lastTip.current = tipW;
         if (T.tracks) {
           // pts live in the robot group's local frame (pitched -90 deg and
           // lifted onto the base plate), so a sample has to pass through that
           // group matrix before it means anything in floor coordinates.
-          if (p.layers.tipTrack) T.tracks.tip.push(T.robot.localToWorld(tip.clone()), snapping);
+          if (p.layers.tipTrack) T.tracks.tip.push(tipW, snapping);
           else T.tracks.tip.hide();
           if (p.layers.midTrack) T.tracks.mid.push(T.robot.localToWorld(mid.clone()), snapping);
           else T.tracks.mid.hide();
@@ -2205,7 +2351,8 @@ function SimulatorWorkspace() {
         const kx = (p.k1 + p.k2 * Math.cos(theta.current)) / 2;
         const ky = (p.k2 * Math.sin(theta.current)) / 2;
         setHud({ theta: theta.current, alpha: a, kres: Math.hypot(kx, ky),
-          V: energy(theta.current, a, p.lambda), Vpp: stiffness(theta.current, p.lambda), vel: rate, snapping });
+          V: energy(theta.current, a, p.lambda), Vpp: stiffness(theta.current, p.lambda), vel: rate, snapping,
+          compass: T.compass?.stats() });
         if (p.sweeping) patchSim({ alphaDeg: Math.round((a * 180) / Math.PI) });
       }
     };
@@ -2253,6 +2400,22 @@ function SimulatorWorkspace() {
                 <div style={{ color: C.ink }}>— resultant curvature</div>
               </>
             )}
+            {layers.compass && (
+              <>
+                <div style={{ marginTop: 6, color: C.dim }}>snap compass</div>
+                <div style={{ color: C.gold }}>— net snap vector Σ E·d̂</div>
+                <div style={{ color: C.dim }}>— single snaps</div>
+                {hud.compass && hud.compass.n > 0 ? (
+                  <div style={{ color: C.gold }}>
+                    Σ {(hud.compass.mag * 1000).toFixed(1)} mJ · align {hud.compass.align.toFixed(2)}
+                    {' · '}n {hud.compass.n}
+                    {hud.compass.bearing !== null && ` · ${hud.compass.bearing.toFixed(0)}°`}
+                  </div>
+                ) : (
+                  <div className="dim">no snaps recorded yet — sweep α</div>
+                )}
+              </>
+            )}
             {anyTrack && (
               <>
                 <div style={{ marginTop: 6, color: C.dim }}>ground track</div>
@@ -2286,17 +2449,20 @@ function SimulatorWorkspace() {
 
                 <div className="sep" />
                 <h3>Energy</h3>
-                <p className="ctr-layer-empty">
-                  No energy layers defined yet. Strain, stored torsional energy and
-                  snap-release density all map onto the backbone and belong here.
-                </p>
+                <LayerRow on={layers.compass} onChange={(v) => setLayer('compass', v)}
+                  swatch={C.gold} name="Net snap vector"
+                  desc="Each snap as a vector at the base: direction = the tip's displacement over the release, length = energy released (mJ). The bold arrow is their sum; 'align' = |Σ| / ΣE." />
+                <LayerRow on={layers.headingUp} onChange={(v) => setLayer('headingUp', v)}
+                  disabled={!layers.compass}
+                  swatch={C.accent} name="Plan view · net vector right"
+                  desc="Compass heading-up mode: turn the top-down view so the net snap vector points screen-right. Off = north-up (nearest cardinal)." />
 
-                {anyTrack && (
+                {(anyTrack || layers.compass) && (
                   <>
                     <div className="sep" />
                     <button className="ctr-btn" style={{ margin: '4px 13px 6px', width: 'calc(100% - 26px)' }}
                       onClick={clearTracks}>
-                      <RotateCcw size={13} /> Clear tracks
+                      <RotateCcw size={13} /> Clear tracks &amp; snaps
                     </button>
                   </>
                 )}
