@@ -1388,6 +1388,8 @@ function SimulatorWorkspace() {
         },
         clear() { n = 0; prev = null; geo.setDrawRange(0, 0); mesh.visible = false; },
         hide() { dLine.visible = false; },
+        /** 0..1 multiplier on the ribbon's opacity; see trackFade(). */
+        setFade(k) { mesh.material.opacity = 0.95 * k; },
         /** Repaint an already-drawn track in the current palette. */
         restyle() {
           for (let i = 0; i < n; i++) {
@@ -1742,7 +1744,23 @@ function SimulatorWorkspace() {
       ang += Math.round((cam.ang - ang) / (2 * Math.PI)) * 2 * Math.PI;
       tween = { p0: cam.phi, a0: cam.ang, p1: phi, a1: ang, t: 0 };
     };
+    /* A ground track is a zero-thickness figure in the floor plane, so its
+       projected area -- and therefore its visual presence -- goes to zero as
+       the view approaches the plane edge-on. The rasteriser disagrees: it
+       keeps at least a one-pixel sliver alive at any grazing angle, which in
+       the FRONT / BACK / LEFT / RIGHT elevations shows up as a stray dashed
+       line along the floor. Fading the ribbon with the camera's elevation
+       above the floor restores what the geometry actually implies. Full
+       strength from about 12 degrees up; gone at the horizon. Plan view sits
+       at 90 degrees and is unaffected. The tie-line is a vertical segment,
+       genuinely visible edge-on, and is left alone. */
+    const trackFade = () => {
+      const elev = Math.abs(Math.PI / 2 - cam.phi);       // above or below the floor
+      const k = THREE.MathUtils.smoothstep(elev, 0.03, 0.22);
+      tracks.tip.setFade(k); tracks.mid.setFade(k);
+    };
     const tick = (dt) => {
+      trackFade();
       if (!tween) return;
       tween.t = Math.min(1, tween.t + dt / 0.3);
       const e = 1 - Math.pow(1 - tween.t, 3);
