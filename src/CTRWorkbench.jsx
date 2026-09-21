@@ -1468,6 +1468,7 @@ function SimulatorWorkspace() {
       cBuild.setHex(hexInt(C.accent));
       cSnap.setHex(hexInt(C.unstable));
       tracks.tip.restyle(); tracks.mid.restyle();
+      styleCube();
 
       scene.remove(gridHelper);
       gridHelper.geometry.dispose(); gridHelper.material.dispose();
@@ -1529,25 +1530,229 @@ function SimulatorWorkspace() {
       applyCam();
     };
 
+    /* ── View cube ─────────────────────────────────────────────────────
+       The SolidWorks / Fusion orientation widget: a translucent chamfered
+       cube in the corner that turns with the camera, whose 26 facets -- six
+       faces, twelve edge chamfers, eight corner bevels -- are each a click
+       target for the view looking in from that direction. Faces give the
+       six orthographic-style views, corners the isometrics, edges the views
+       in between.
+
+       It is drawn into a scissored viewport of the SAME renderer as a second
+       scene, not as DOM: it has to be a real 3-D object that shares the main
+       camera's rotation exactly, and a CSS cube cannot be raycast against
+       reliably. The cube camera copies the active camera's quaternion each
+       frame, so roll is mirrored too -- in plan view, where up is -Z, the
+       cube shows its TOP face with FRONT at the bottom of the screen, which
+       is the drafting convention.
+
+       The chamfered form is built from one vertex family: every vertex is at
+       distance 1 along one axis and +-S_IN along the other two (24 points).
+       A face is the four points sharing an axis and sign; an edge chamfer
+       joins the two such points on each of two adjacent faces; a corner
+       bevel takes one point from each of three faces. */
+    const CUBE_PX = 112, CUBE_PAD = 14, CUBE_TOP = 12;
+    const S_IN = 0.66;                   // face half-width; the rest is chamfer
+    const CUBE_DIST = 6.8;
+    const cubeScene = new THREE.Scene();
+    const cubeCam = new THREE.PerspectiveCamera(30, 1, 0.1, 40);
+    cubeCam.updateProjectionMatrix();
+    const facets = [];                    // every pickable piece; userData.dir
+    const cubeLines = [];
+    const labelCanvases = [];             // [canvas, texture, text]
+
+    const cubePt = (major, sMajor, others) => {
+      const v = [0, 0, 0]; v[major] = sMajor;
+      for (const [ax, sg] of others) v[ax] = sg * S_IN;
+      return new THREE.Vector3(v[0], v[1], v[2]);
+    };
+    const glassMat = () => new THREE.MeshBasicMaterial({
+      color: hexInt(C.dim), transparent: true, opacity: 0.38,
+      side: THREE.DoubleSide, depthWrite: false, toneMapped: false,
+    });
+    const addFacet = (pts, dir) => {
+      const g = new THREE.BufferGeometry().setFromPoints(pts);
+      g.setIndex(pts.length === 4 ? [0, 1, 2, 0, 2, 3] : [0, 1, 2]);
+      const m = new THREE.Mesh(g, glassMat());
+      m.userData.dir = dir.normalize();
+      cubeScene.add(m); facets.push(m);
+      const ln = new THREE.LineSegments(new THREE.EdgesGeometry(g),
+        new THREE.LineBasicMaterial({ color: hexInt(C.ink), transparent: true, opacity: 0.55, toneMapped: false }));
+      cubeScene.add(ln); cubeLines.push(ln);
+    };
+    // faces
+    for (let a = 0; a < 3; a++) for (const sa of [1, -1]) {
+      const b = (a + 1) % 3, c = (a + 2) % 3;
+      addFacet([cubePt(a, sa, [[b, -1], [c, -1]]), cubePt(a, sa, [[b, 1], [c, -1]]),
+        cubePt(a, sa, [[b, 1], [c, 1]]), cubePt(a, sa, [[b, -1], [c, 1]])],
+      new THREE.Vector3().setComponent(a, sa));
+    }
+    // edge chamfers
+    for (let a = 0; a < 3; a++) for (let b = a + 1; b < 3; b++) {
+      const c = 3 - a - b;
+      for (const sa of [1, -1]) for (const sb of [1, -1]) {
+        addFacet([cubePt(a, sa, [[b, sb], [c, -1]]), cubePt(a, sa, [[b, sb], [c, 1]]),
+          cubePt(b, sb, [[a, sa], [c, 1]]), cubePt(b, sb, [[a, sa], [c, -1]])],
+        new THREE.Vector3().setComponent(a, sa).setComponent(b, sb));
+      }
+    }
+    // corner bevels
+    for (const sx of [1, -1]) for (const sy of [1, -1]) for (const sz of [1, -1]) {
+      addFacet([cubePt(0, sx, [[1, sy], [2, sz]]), cubePt(1, sy, [[0, sx], [2, sz]]), cubePt(2, sz, [[0, sx], [1, sy]])],
+        new THREE.Vector3(sx, sy, sz));
+    }
+    // face labels: a plane floated just off each face, front-side only so a
+    // label never shows through mirrored from the far side of the glass.
+    const drawLabel = (cv, text) => {
+      const g = cv.getContext('2d');
+      g.clearRect(0, 0, cv.width, cv.height);
+      g.fillStyle = C.ink; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = '600 58px Oswald, "Fira Sans", sans-serif';
+      g.fillText(text, cv.width / 2, cv.height / 2 + 4);
+    };
+    const LABELS = [
+      ['RIGHT', [1, 0, 0], [0, Math.PI / 2, 0]], ['LEFT', [-1, 0, 0], [0, -Math.PI / 2, 0]],
+      ['TOP', [0, 1, 0], [-Math.PI / 2, 0, 0]], ['BOTTOM', [0, -1, 0], [Math.PI / 2, 0, 0]],
+      ['FRONT', [0, 0, 1], [0, 0, 0]], ['BACK', [0, 0, -1], [0, Math.PI, 0]],
+    ];
+    for (const [text, n, rot] of LABELS) {
+      const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
+      drawLabel(cv, text);
+      const tex = new THREE.CanvasTexture(cv);
+      tex.colorSpace = THREE.SRGBColorSpace; tex.minFilter = THREE.LinearFilter;
+      const pl = new THREE.Mesh(new THREE.PlaneGeometry(2 * S_IN, 2 * S_IN),
+        new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false }));
+      pl.position.set(n[0] * 1.004, n[1] * 1.004, n[2] * 1.004);
+      pl.rotation.set(rot[0], rot[1], rot[2]);
+      cubeScene.add(pl);
+      labelCanvases.push([cv, tex, text]);
+    }
+
+    let hovered = null;
+    const styleFacet = (m, hot) => {
+      m.material.color.setHex(hot ? hexInt(C.accent) : hexInt(C.dim));
+      m.material.opacity = hot ? 0.82 : 0.38;
+    };
+    const styleCube = () => {
+      facets.forEach((m) => styleFacet(m, m === hovered));
+      cubeLines.forEach((l) => l.material.color.setHex(hexInt(C.ink)));
+      labelCanvases.forEach(([cv, tex, text]) => { drawLabel(cv, text); tex.needsUpdate = true; });
+    };
+    const setHover = (m) => {
+      if (hovered === m) return;
+      if (hovered) styleFacet(hovered, false);
+      hovered = m;
+      if (m) styleFacet(m, true);
+      renderer.domElement.style.cursor = m ? 'pointer' : '';
+    };
+
+    const cubeSize = new THREE.Vector2(), cubeFwd = new THREE.Vector3();
+    const renderCube = () => {
+      const active = planOn ? ortho : camera;
+      active.getWorldDirection(cubeFwd);
+      cubeCam.position.copy(cubeFwd).multiplyScalar(-CUBE_DIST);
+      cubeCam.quaternion.copy(active.quaternion);
+      renderer.getSize(cubeSize);
+      const x = cubeSize.x - CUBE_PAD - CUBE_PX, y = cubeSize.y - CUBE_TOP - CUBE_PX;
+      renderer.autoClear = false;
+      renderer.clearDepth();
+      renderer.setScissorTest(true);
+      renderer.setViewport(x, y, CUBE_PX, CUBE_PX);
+      renderer.setScissor(x, y, CUBE_PX, CUBE_PX);
+      renderer.render(cubeScene, cubeCam);
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, cubeSize.x, cubeSize.y);
+      renderer.autoClear = true;
+    };
+
+    const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+    /** undefined = pointer outside the cube's square; null = inside but off
+     *  the cube; otherwise the facet under the pointer. */
+    const cubeHit = (e) => {
+      const r = renderer.domElement.getBoundingClientRect();
+      renderer.getSize(cubeSize);
+      const px = e.clientX - r.left, py = e.clientY - r.top;
+      const x0 = cubeSize.x - CUBE_PAD - CUBE_PX, y0 = CUBE_TOP;
+      if (px < x0 || px > x0 + CUBE_PX || py < y0 || py > y0 + CUBE_PX) return undefined;
+      ndc.set(((px - x0) / CUBE_PX) * 2 - 1, -(((py - y0) / CUBE_PX) * 2 - 1));
+      ray.setFromCamera(ndc, cubeCam);
+      const hits = ray.intersectObjects(facets, false);
+      return hits.length ? hits[0].object : null;
+    };
+
+    /* Orbit tween. Faces, edges and corners glide into place; the two axial
+       views (TOP, BOTTOM) snap instead, because they need their own up
+       vector -- at the pole the default +Y up is parallel to the view and
+       lookAt is undefined -- and a roll cannot be tweened gracefully. TOP is
+       routed to the existing orthographic plan view, which already handles
+       this exactly. */
+    let tween = null;
+    const exitPlanQuiet = () => {
+      if (!planOn) return;
+      // Leave plan view WITHOUT restoring the saved orbit: the caller is
+      // about to set an orientation of its own. React's setTop(false) then
+      // finds nothing to restore and is a no-op.
+      planOn = false; savedCam = null; scene.fog = planFog;
+      setTopView(false);
+    };
+    const setView = (d) => {
+      if (d.y > 0.999) { setTopView(true); return; }
+      exitPlanQuiet();
+      tween = null;
+      if (d.y < -0.999) {
+        cam.phi = Math.PI - 1e-3;
+        camera.up.set(0, 0, 1);          // drafting: FRONT at the top of a bottom view
+        applyCam();
+        return;
+      }
+      camera.up.set(0, 1, 0);
+      const phi = Math.acos(THREE.MathUtils.clamp(d.y, -1, 1));
+      let ang = Math.atan2(d.x, d.z);
+      // Take the short way round.
+      ang += Math.round((cam.ang - ang) / (2 * Math.PI)) * 2 * Math.PI;
+      tween = { p0: cam.phi, a0: cam.ang, p1: phi, a1: ang, t: 0 };
+    };
+    const tick = (dt) => {
+      if (!tween) return;
+      tween.t = Math.min(1, tween.t + dt / 0.3);
+      const e = 1 - Math.pow(1 - tween.t, 3);
+      cam.phi = tween.p0 + (tween.p1 - tween.p0) * e;
+      cam.ang = tween.a0 + (tween.a1 - tween.a0) * e;
+      applyCam();
+      if (tween.t >= 1) tween = null;
+    };
+
     let drag = null;
     const el = renderer.domElement;
     el.style.touchAction = 'none';
-    const down = (e) => { drag = { x: e.clientX, y: e.clientY, pan: e.shiftKey || e.button === 2 }; el.setPointerCapture(e.pointerId); };
+    const down = (e) => {
+      const h = cubeHit(e);
+      if (h) { setView(h.userData.dir); return; }   // a click on the cube never orbits
+      tween = null;
+      drag = { x: e.clientX, y: e.clientY, pan: e.shiftKey || e.button === 2 };
+      el.setPointerCapture(e.pointerId);
+    };
     const move = (e) => {
-      if (!drag) return;
+      if (!drag) { setHover(cubeHit(e) || null); return; }
       const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       drag.x = e.clientX; drag.y = e.clientY;
       // Plan view is a fixed orientation by definition, so a drag can only
       // ever pan it -- orbiting would silently tilt it off vertical and
       // reintroduce the very misalignment it exists to remove.
       if (drag.pan || planOn) { cam.tx -= dx * 0.35; cam.ty += dy * 0.35; }
-      else { cam.ang -= dx * 0.006; cam.phi = Math.max(0.12, Math.min(Math.PI - 0.12, cam.phi - dy * 0.006)); }
+      else {
+        // An orbit always runs with +Y up; a BOTTOM snap may have left a
+        // different up vector behind, and dragging out of it should not roll.
+        camera.up.set(0, 1, 0);
+        cam.ang -= dx * 0.006; cam.phi = Math.max(0.12, Math.min(Math.PI - 0.12, cam.phi - dy * 0.006));
+      }
       applyCam();
     };
     const up = () => { drag = null; };
     const wheel = (e) => { e.preventDefault(); cam.r = Math.max(70, Math.min(900, cam.r * (1 + Math.sign(e.deltaY) * 0.09))); applyCam(); };
     el.addEventListener('pointerdown', down); el.addEventListener('pointermove', move);
-    el.addEventListener('pointerup', up); el.addEventListener('pointerleave', up);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointerleave', () => { up(); setHover(null); });
     el.addEventListener('wheel', wheel, { passive: false });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -1561,7 +1766,7 @@ function SimulatorWorkspace() {
     resize();
     const ro = new ResizeObserver(resize); ro.observe(mount);
 
-    three.current = { scene, camera, renderer, outer, inner, core, glow, tipOrb, arrows, matCore, matGlow, matInner, matOuter, setTop, tracks, robot, restyle,
+    three.current = { scene, camera, renderer, outer, inner, core, glow, tipOrb, arrows, matCore, matGlow, matInner, matOuter, setTop, tracks, robot, restyle, renderCube, tick,
       cam: () => (planOn ? ortho : camera),
       reframe: () => { cam.r = frameR(); cam.tx = 0; cam.ty = 0; applyCam(); } };
     return () => {
@@ -1571,6 +1776,9 @@ function SimulatorWorkspace() {
       el.removeEventListener('wheel', wheel);
       envRT.dispose();
       tracks.tip.dispose(); tracks.mid.dispose();
+      facets.forEach((m) => { m.geometry.dispose(); m.material.dispose(); });
+      cubeLines.forEach((l) => { l.geometry.dispose(); l.material.dispose(); });
+      labelCanvases.forEach(([, tex]) => tex.dispose());
       gridHelper.geometry.dispose(); gridHelper.material.dispose();
       renderer.dispose();
       if (mount.contains(renderer.domElement)) mount.removeChild(renderer.domElement);
@@ -1930,7 +2138,9 @@ function SimulatorWorkspace() {
             T.arrows[k].position.copy(mid); T.arrows[k].setDirection(dir);
             T.arrows[k].visible = vec && vis;
           });
+        T.tick?.(dt);
         T.renderer.render(T.scene, T.cam());
+        T.renderCube?.();
       }
 
       drawEnergy(a, p.lambda, theta.current, snapping);
@@ -1961,6 +2171,7 @@ function SimulatorWorkspace() {
           <div className="ctr-overlay mono dim" style={{ top: 12, left: 12 }}>
             <div>drag · orbit</div><div>shift + drag · pan</div><div>scroll · zoom</div>
             <div style={{ color: topView ? C.accent : undefined }}>space · {topView ? 'exit plan view' : 'plan view'}</div>
+            <div>view cube · click a face, edge or corner</div>
             {anyTrack && !topView && (
               <div style={{ color: C.accent }}>tracks drawn on floor — press space</div>
             )}
@@ -1978,7 +2189,9 @@ function SimulatorWorkspace() {
             </div>
           </div>
 
-          <div className="ctr-overlay mono" style={{ top: 12, right: 12, textAlign: 'right' }}>
+          {/* Sits below the view cube, which occupies the top-right corner of
+              the WebGL canvas (112 px + its padding). */}
+          <div className="ctr-overlay mono" style={{ top: 12 + 112 + 12, right: 12, textAlign: 'right' }}>
             {layers.vectors && (
               <>
                 <div style={{ color: C.blue }}>— outer tube κ₁</div>
