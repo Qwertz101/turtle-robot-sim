@@ -1091,6 +1091,9 @@ function SimulatorWorkspace() {
   const [sweeping, setSweeping] = useState(false);
   const [slow, setSlow] = useState(false);
   const [topView, setTopView] = useState(false);
+  // The view cube can be hidden to reclaim the corner. Space toggles it; the
+  // plan view itself is now reached through the cube's TOP face.
+  const [cubeOn, setCubeOn] = useState(true);
   /* Data layers. Each one is an independent read on the SAME configured
      robot, in the manner of a mapping app: the scene is the map, the layers
      are the overlays. Categories are fixed (motion, energy) so a new overlay
@@ -1151,13 +1154,14 @@ function SimulatorWorkspace() {
       if (document.activeElement && document.activeElement.tagName === 'BUTTON') {
         document.activeElement.blur();
       }
-      setTopView((v) => !v);
+      setCubeOn((v) => !v);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   useEffect(() => { three.current.setTop?.(topView); }, [topView]);
+  useEffect(() => { three.current.setCubeVisible?.(cubeOn); }, [cubeOn]);
 
   /* Repaint the scene for the new palette. The 2-D plots need no equivalent:
      they are redrawn from scratch every animation frame, so they pick the new
@@ -1484,6 +1488,22 @@ function SimulatorWorkspace() {
     // tan(42 deg / 2) = 0.384: matching half-height keeps the framing roughly
     // continuous across the switch instead of jumping scale.
     const PLAN_HALF = 0.384;
+    /* Which way is up in the plan view. Not a constant: it is the heading
+       the orbit already had, snapped to the nearest of the four cardinal
+       directions, so a model you had turned "left side up" is still left
+       side up when you look straight down at it. In a 3/4 view the far side
+       of the floor is the top of the screen, and that far side lies along
+       -(sin ang, cos ang); snapping ang to a multiple of 90 deg makes the
+       plan view axis-aligned (a grid at 37 deg is not a plan view) while
+       staying as close as possible to what was on screen. The screen-right
+       axis follows from it, and panning has to use both so the scene still
+       follows the mouse when the view is turned. */
+    const planUp = new THREE.Vector3(0, 0, -1), planRight = new THREE.Vector3(1, 0, 0);
+    const snapHeading = () => Math.round(cam.ang / (Math.PI / 2)) * (Math.PI / 2);
+    const setPlanHeading = (q) => {
+      planUp.set(-Math.sin(q), 0, -Math.cos(q));
+      planRight.set(Math.cos(q), 0, -Math.sin(q));       // = (-Y) x up
+    };
     const applyCam = () => {
       camera.position.set(
         cam.r * Math.sin(cam.phi) * Math.sin(cam.ang) + cam.tx,
@@ -1497,7 +1517,7 @@ function SimulatorWorkspace() {
         const h = Math.max(20, cam.r * PLAN_HALF), a = camera.aspect || 1;
         ortho.left = -h * a; ortho.right = h * a; ortho.top = h; ortho.bottom = -h;
         ortho.position.set(cam.tx, 700, cam.ty);
-        ortho.up.set(0, 0, -1);
+        ortho.up.copy(planUp);
         ortho.lookAt(cam.tx, -60, cam.ty);
         ortho.updateProjectionMatrix();
       }
@@ -1521,7 +1541,9 @@ function SimulatorWorkspace() {
       scene.fog = on ? null : planFog;
       if (on) {
         savedCam = { ...cam };
-        cam.phi = 1e-3; cam.ang = 0; cam.tx = 0; cam.ty = 0;
+        const q = snapHeading();
+        setPlanHeading(q);
+        cam.phi = 1e-3; cam.ang = q; cam.tx = 0; cam.ty = 0;
         cam.r = frameR() * 0.92;
       } else {
         if (savedCam) Object.assign(cam, savedCam);
@@ -1646,8 +1668,11 @@ function SimulatorWorkspace() {
       renderer.domElement.style.cursor = m ? 'pointer' : '';
     };
 
+    let cubeOn = true;
+    const setCubeVisible = (v) => { cubeOn = v; if (!v) setHover(null); };
     const cubeSize = new THREE.Vector2(), cubeFwd = new THREE.Vector3();
     const renderCube = () => {
+      if (!cubeOn) return;
       const active = planOn ? ortho : camera;
       active.getWorldDirection(cubeFwd);
       cubeCam.position.copy(cubeFwd).multiplyScalar(-CUBE_DIST);
@@ -1669,6 +1694,7 @@ function SimulatorWorkspace() {
     /** undefined = pointer outside the cube's square; null = inside but off
      *  the cube; otherwise the facet under the pointer. */
     const cubeHit = (e) => {
+      if (!cubeOn) return undefined;
       const r = renderer.domElement.getBoundingClientRect();
       renderer.getSize(cubeSize);
       const px = e.clientX - r.left, py = e.clientY - r.top;
@@ -1700,8 +1726,12 @@ function SimulatorWorkspace() {
       exitPlanQuiet();
       tween = null;
       if (d.y < -0.999) {
+        // Same heading rule as the plan view, mirrored: flipping a part over
+        // to see its underside swaps which edge is at the top of the screen.
+        const q = snapHeading();
+        cam.ang = q;
         cam.phi = Math.PI - 1e-3;
-        camera.up.set(0, 0, 1);          // drafting: FRONT at the top of a bottom view
+        camera.up.set(Math.sin(q), 0, Math.cos(q));
         applyCam();
         return;
       }
@@ -1739,7 +1769,12 @@ function SimulatorWorkspace() {
       // Plan view is a fixed orientation by definition, so a drag can only
       // ever pan it -- orbiting would silently tilt it off vertical and
       // reintroduce the very misalignment it exists to remove.
-      if (drag.pan || planOn) { cam.tx -= dx * 0.35; cam.ty += dy * 0.35; }
+      if (planOn) {
+        // cam.ty is world Z here. Move against the drag along the plan's own
+        // screen axes so the scene tracks the mouse whichever way it is turned.
+        cam.tx += (-dx * planRight.x - dy * planUp.x) * 0.35;
+        cam.ty += (-dx * planRight.z - dy * planUp.z) * 0.35;
+      } else if (drag.pan) { cam.tx -= dx * 0.35; cam.ty += dy * 0.35; }
       else {
         // An orbit always runs with +Y up; a BOTTOM snap may have left a
         // different up vector behind, and dragging out of it should not roll.
@@ -1766,7 +1801,7 @@ function SimulatorWorkspace() {
     resize();
     const ro = new ResizeObserver(resize); ro.observe(mount);
 
-    three.current = { scene, camera, renderer, outer, inner, core, glow, tipOrb, arrows, matCore, matGlow, matInner, matOuter, setTop, tracks, robot, restyle, renderCube, tick,
+    three.current = { scene, camera, renderer, outer, inner, core, glow, tipOrb, arrows, matCore, matGlow, matInner, matOuter, setTop, tracks, robot, restyle, renderCube, tick, setCubeVisible,
       cam: () => (planOn ? ortho : camera),
       reframe: () => { cam.r = frameR(); cam.tx = 0; cam.ty = 0; applyCam(); } };
     return () => {
@@ -2170,10 +2205,11 @@ function SimulatorWorkspace() {
         <div className="ctr-view" ref={mountRef}>
           <div className="ctr-overlay mono dim" style={{ top: 12, left: 12 }}>
             <div>drag · orbit</div><div>shift + drag · pan</div><div>scroll · zoom</div>
-            <div style={{ color: topView ? C.accent : undefined }}>space · {topView ? 'exit plan view' : 'plan view'}</div>
             <div>view cube · click a face, edge or corner</div>
+            <div>space · {cubeOn ? 'hide' : 'show'} view cube</div>
+            {topView && <div style={{ color: C.accent }}>plan view · click a cube face to leave</div>}
             {anyTrack && !topView && (
-              <div style={{ color: C.accent }}>tracks drawn on floor — press space</div>
+              <div style={{ color: C.accent }}>tracks drawn on floor — view from TOP</div>
             )}
           </div>
 
@@ -2191,7 +2227,7 @@ function SimulatorWorkspace() {
 
           {/* Sits below the view cube, which occupies the top-right corner of
               the WebGL canvas (112 px + its padding). */}
-          <div className="ctr-overlay mono" style={{ top: 12 + 112 + 12, right: 12, textAlign: 'right' }}>
+          <div className="ctr-overlay mono" style={{ top: cubeOn ? 12 + 112 + 12 : 12, right: 12, textAlign: 'right' }}>
             {layers.vectors && (
               <>
                 <div style={{ color: C.blue }}>— outer tube κ₁</div>
