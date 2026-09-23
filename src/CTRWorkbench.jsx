@@ -268,6 +268,27 @@ const CSS = `
 .ctr-spec{display:flex;flex-wrap:wrap;gap:4px 16px;}
 .ctr-spec span{font-family:var(--font-mono);font-size:10px;color:var(--ink-600);}
 .ctr-spec b{font-weight:400;color:var(--ink-900);}
+
+/* Tube section editor: three linked fields per tube. */
+.ctr-sect{display:grid;grid-template-columns:auto repeat(3,minmax(0,1fr));gap:6px 8px;
+  align-items:center;}
+.ctr-sect .h{font-weight:500;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--ink-600);text-align:center;}
+.ctr-sect .t{font-size:11.5px;color:var(--ink-900);white-space:nowrap;}
+.ctr-num{width:100%;min-width:0;padding:5px 6px;border-radius:5px;
+  background:var(--paper-50);border:1px solid var(--line-300);color:var(--ink-900);
+  font-family:var(--font-mono);font-size:12px;font-variant-numeric:tabular-nums;}
+.ctr-num:focus{outline:none;border-color:var(--rams-500);}
+.ctr-seg{display:flex;border:1px solid var(--line-300);border-radius:6px;overflow:hidden;}
+.ctr-seg button{flex:1;padding:7px 8px;background:var(--paper-100);border:0;cursor:pointer;
+  font-family:var(--font-display);font-weight:500;font-size:11px;text-transform:uppercase;
+  letter-spacing:.03em;color:var(--ink-600);}
+.ctr-seg button + button{border-left:1px solid var(--line-300);}
+.ctr-seg button.on{background:var(--rams-500);color:var(--paper-50);}
+.ctr-verdict{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.ctr-verdict > div{padding:8px 10px;border-radius:6px;border:1px solid var(--line-300);
+  background:var(--paper-100);}
+.ctr-verdict > div.act{border-color:var(--rams-500);}
 `;
 
 /* ── Runtime palette ──────────────────────────────────────────────────────
@@ -402,18 +423,20 @@ function rodrigues(vx, vy, vz) {
  *  @param Lc overlap length (m) — sets the ARC LENGTH of the curved section,
  *         so the rendered tube physically lengthens with the L_c slider.
  *  @returns pts in millimetres. */
-function integrateShape(alpha, thetaTip, k1, k2, Lc, Lext) {
+function integrateShape(alpha, thetaTip, k1, k2, Lc, Lext, w1 = 0.5, w2 = 0.5) {
   const ds = Lc / N_STEPS;
   let R = eye3(), px = 0, py = 0, pz = 0;
   const pts = [new THREE.Vector3(0, 0, 0)];
 
   // 1 · OVERLAP, s ∈ [0, L_c]. Both tubes present, so the curvature is the
-  //     equal-stiffness average of the two precurvature vectors (Part 5).
+  //     BENDING-STIFFNESS-WEIGHTED sum of the two precurvature vectors
+  //     (Part 5, general form). w1 = w2 = 1/2 only for identical tubes; the
+  //     /2 form is wrong the moment the cross-sections differ.
   for (let i = 0; i < N_STEPS; i++) {
     const s = i / N_STEPS;
     const th = alpha + (thetaTip - alpha) * s;
-    const Kx = (k1 + k2 * Math.cos(th)) / 2;
-    const Ky = (k2 * Math.sin(th)) / 2;
+    const Kx = w1 * k1 + w2 * k2 * Math.cos(th);
+    const Ky = w2 * k2 * Math.sin(th);
     px += R[0][2] * ds; py += R[1][2] * ds; pz += R[2][2] * ds;
     pts.push(new THREE.Vector3(px * M2MM, py * M2MM, pz * M2MM));
     R = matmul3(R, rodrigues(Kx * ds, Ky * ds, 0));
@@ -454,8 +477,9 @@ const NITINOL = (() => {
   const I = (Math.PI / 64) * (d_o ** 4 - d_i ** 4), J = 2 * I;   // J = 2I exact
   return { E, nu, G, d_o, d_i, I, J, kb: E * I, kt: G * J, r: d_o / 2 };
 })();
-// kb/kt = EI/GJ = 1+nu = 1.33 for a circular section (Part 2 special case).
-const C_STIFF = NITINOL.kb / NITINOL.kt;
+// Material only (E, nu, G) is shared between the tubes; each tube's section
+// and stiffness come from pairMechanics() below. The d_o / kb / kt kept here
+// describe the app's original 1.02 mm tube, i.e. DEFAULT_TUBES.
 const EPS_SUPERELASTIC = 0.08;   // MONOTONIC limit — never a cyclic safety gate
 /** Coffin-Manson inverted for a target cycle count (Part 6). This, not the
  *  8% monotonic limit, is the fatigue-relevant allowable strain. */
@@ -479,22 +503,74 @@ function motorWork(lambda) {
  *  RELATIVE ranking across the sweep (Part 6 / Part 7). */
 const fatigueLife = (e) => (e > 0 ? 10 * Math.pow(e, -5) : Infinity);
 
-/** λ = (k_b/k_t)·L_c²·κ₁·κ₂ — bifurcation index of a two-tube system.
- *  ASSUMES EQUAL STIFFNESS (k1b=k2b, k1t=k2t), i.e. two tubes of the same
- *  material and cross-section. The general form in CTR_PHYSICS_RULES Part 2
- *  carries both tubes' stiffness ratios and must be restored if that ever
- *  stops holding.
- *  It is a PRODUCT of the two precurvatures, so a straight tube anywhere in
- *  the pair (κ = 0) drives λ to zero and the system cannot snap at all: with
- *  nothing to twist against, there is no competing curvature to store energy.
- *  The design sweep varies a single κ, which is this same expression on the
- *  equal-precurvature diagonal κ₁ = κ₂ = κ, giving the λ = C·L_c²·κ² of the
- *  specification. */
-const bifurcation = (k1, k2, Lc) => C_STIFF * Lc * Lc * k1 * k2;
+/* ── Two-tube mechanics, general form ─────────────────────────────────────
+   Tube 1 = OUTER / constraint tube (κ₁), tube 2 = INNER fin (κ₂), matching
+   the rest of the app. Each tube now has its own cross-section, so the
+   equal-stiffness shortcut λ = (k_b/k_t)·L²·κ₁κ₂ no longer holds and the
+   GENERAL formula of CTR_PHYSICS_RULES Part 2 is used:
 
-function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05) {
-  const lambda = C_STIFF * Lc * Lc * kappa * kappa;
-  const eb = kappa * NITINOL.r;
+       λ = L_c²·κ₁κ₂ · [k1b·k2b / (k1b + k2b)] · [1/k1t + 1/k2t]
+
+   The last bracket is the torsional COMPLIANCE of the relative twist θ: the
+   two tubes carry it in series, like two springs end to end. That is where
+   the "fully constrained outer tube" option enters. Locking the outer tube
+   against rotation along its whole length makes it torsionally rigid, so its
+   term 1/k1t drops out and only the inner tube can store twist:
+
+       λ_locked = L_c²·κ₁κ₂ · [k1b·k2b / (k1b + k2b)] · [1/k2t]
+
+   Less compliance means a smaller λ -- for identical tubes exactly half. A
+   design sitting at 2.5 < λ < 4.9 snaps when free and does NOT snap when the
+   outer tube is locked.
+
+   Energy scale. The rules give E_J = ΔV·(k_t/L_c) with the SHARED k_t of the
+   equal-stiffness case. Its general form here is 2·k_eff/L_c, where
+   k_eff = 1/(compliance) is the stiffness of the relative twist; it reduces
+   exactly to the rules' k_t/L_c for two identical free tubes, so no existing
+   number moves. See the note in the handoff: a direct derivation of the
+   lumped energy gives k_eff/L_c, i.e. the rules' convention may carry a
+   factor of 2 -- kept as-is here, because the rules file is authoritative and
+   the factor is uniform, so every comparison between designs and modes is
+   unaffected. */
+function tubeSection(odMm, idMm) {
+  const d_o = odMm / 1000, d_i = idMm / 1000;
+  const I = (Math.PI / 64) * (d_o ** 4 - d_i ** 4), J = 2 * I;     // J = 2I exact
+  return { d_o, d_i, r: d_o / 2, I, J, kb: NITINOL.E * I, kt: NITINOL.G * J };
+}
+function pairMechanics(tubes, outerLocked) {
+  const t1 = tubeSection(tubes.outer.od, tubes.outer.id);
+  const t2 = tubeSection(tubes.inner.od, tubes.inner.id);
+  const kbRed = (t1.kb * t2.kb) / (t1.kb + t2.kb);
+  const complFree = 1 / t1.kt + 1 / t2.kt;
+  const complLocked = 1 / t2.kt;
+  const compl = outerLocked ? complLocked : complFree;
+  return {
+    t1, t2, outerLocked,
+    C: kbRed * compl,                     // λ = C·L_c²·κ₁κ₂
+    Cfree: kbRed * complFree, Clocked: kbRed * complLocked,
+    // Part 5 weights: curvature of the overlap is the bending-stiffness
+    // weighted sum of the two precurvature vectors (1/2, 1/2 only if equal).
+    w1: t1.kb / (t1.kb + t2.kb), w2: t2.kb / (t1.kb + t2.kb),
+    kScale: 2 / compl,                    // N·m²; E_J = ΔV·kScale/L_c (see above)
+    rMax: Math.max(t1.r, t2.r),
+    clearance: tubes.outer.id - tubes.inner.od,   // mm; must be > 0 to nest
+  };
+}
+/** The pair the app shipped with: two identical 1.02 / 0.82 mm tubes, free. */
+const DEFAULT_TUBES = { outer: { od: 1.02, id: 0.82 }, inner: { od: 1.02, id: 0.82 } };
+
+/** λ for the current pair. It is a PRODUCT of the two precurvatures, so a
+ *  straight tube anywhere in the pair (κ = 0) drives λ to zero and the system
+ *  cannot snap: with nothing to twist against there is no competing curvature
+ *  to store energy. The design sweep varies a single κ, i.e. this expression
+ *  on the diagonal κ₁ = κ₂ = κ (Part 2 rule: stated explicitly). */
+const bifurcation = (k1, k2, Lc, mech) => mech.C * Lc * Lc * k1 * k2;
+
+function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech) {
+  const lambda = mech.C * Lc * Lc * kappa * kappa;     // κ₁ = κ₂ = κ (sweep diagonal)
+  // Bending strain per tube, ε = κ·d_o/2 on each tube's OWN diameter (Part 6:
+  // never mix diameters); the larger governs.
+  const eb = kappa * mech.rMax;
   const base = {
     kappa, Lc, lambda, eb, gamma: 0, eeq: eb, dE: 0, dE_J: 0, Win: 0, eta: 0,
     score: 0, thetaPeak: 0, thetaStable: 0, stored_J: 0, N: fatigueLife(eb), regime: 'stable',
@@ -520,11 +596,21 @@ function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05) {
   if (thetaStable === null) return base;
 
   const dE = energy(thetaPeak, alphaSnap, lambda) - energy(thetaStable, alphaSnap, lambda);
-  const scale = NITINOL.kt / Lc;
-  const gamma = (Math.abs(thetaStable - thetaPeak) / Lc) * NITINOL.r;
+  const scale = mech.kScale / Lc;
+  // Torsional strain per tube (Part 6 engineering estimate): the snap's angle
+  // jump spread over L_c, times that tube's own radius. As in the rules, a
+  // free tube is charged the FULL jump (a conservative bound -- in series
+  // the two share it). A locked outer tube cannot twist at all, so it carries
+  // none and the inner tube carries all of it.
+  const dth = Math.abs(thetaStable - thetaPeak) / Lc;
+  const g1 = mech.outerLocked ? 0 : dth * mech.t1.r;
+  const g2 = dth * mech.t2.r;
   // Approximate combined-strain metric (Part 6). The 0.33 is a deliberate
   // stand-in for nu, NOT 1/3, and this is NOT the literature von Mises strain.
-  const eeq = Math.sqrt(eb * eb + 0.33 * gamma * gamma);
+  const e1 = Math.hypot(kappa * mech.t1.r, Math.sqrt(0.33) * g1);
+  const e2 = Math.hypot(kappa * mech.t2.r, Math.sqrt(0.33) * g2);
+  const eeq = Math.max(e1, e2);
+  const gamma = Math.max(g1, g2);
   const Win = motorWork(lambda);
   // ENGINEERING PLACEHOLDER (Part 6). etaK has no physical derivation and is
   // NOT from the burst-and-coast swimming paper, which supplies qualitative
@@ -645,8 +731,8 @@ const torqueAvail = (rpm, rpmNoLoad, stall_Nmm) =>
  * P = ½ρ C_d A v³. It ignores friction, superelastic hysteresis loss, and
  * added-mass effects, so it is an optimistic upper bound — not a prediction.
  */
-function propulsion(lambda, Lc, motor, hydro) {
-  const scale = NITINOL.kt / Lc;                  // N·m per unit of V(θ)
+function propulsion(lambda, Lc, motor, hydro, mech) {
+  const scale = mech.kScale / Lc;                 // N·m per unit of V(θ)
   const REVS = 1;
   const loop = hysteresisLoop(lambda, REVS, 520);
   const snaps = [...loop.up.snaps, ...loop.down.snaps];
@@ -692,13 +778,13 @@ function propulsion(lambda, Lc, motor, hydro) {
   };
 }
 
-function buildGrid({ nx, ny, kappaMax, LcMin, LcMax, strainLimit, etaK }) {
+function buildGrid({ nx, ny, kappaMax, LcMin, LcMax, strainLimit, etaK, mech }) {
   const cells = [];
   let best = null, maxDE = 0, maxMJ = 0, maxScore = 0;
   for (let j = 0; j < ny; j++) {
     const Lc = LcMin + ((LcMax - LcMin) * j) / (ny - 1);
     for (let i = 0; i < nx; i++) {
-      const d = evaluateDesign((kappaMax * i) / (nx - 1), Lc, strainLimit, etaK);
+      const d = evaluateDesign((kappaMax * i) / (nx - 1), Lc, strainLimit, etaK, mech);
       cells.push(d);
       if (d.dE > maxDE) maxDE = d.dE;
       if (d.dE_J > maxMJ) maxMJ = d.dE_J;
@@ -932,9 +1018,17 @@ function useDesignStore() {
   // scenes repaint), and local state does not survive its component
   // unmounting — a theme toggle was silently switching every layer back off.
   const [layers, setLayers] = useState({ tipTrack: false, midTrack: false, vectors: true, compass: false, headingUp: false });
+  // Tube cross-sections (mm) and the outer tube's rotational constraint.
+  // Part of the SPECIFICATION, so owned here like every other configured
+  // quantity; `mech` is derived once and read by every view.
+  const [tubes, setTubes] = useState(DEFAULT_TUBES);
+  const [outerLocked, setOuterLocked] = useState(false);
+  const mech = useMemo(() => pairMechanics(tubes, outerLocked), [tubes, outerLocked]);
   const [handoff, setHandoff] = useState(null);
 
   const patchSim = useCallback((p) => setSim((s) => ({ ...s, ...p })), []);
+  const patchTube = useCallback((which, p) =>
+    setTubes((t) => ({ ...t, [which]: { ...t[which], ...p } })), []);
   const patchMotor = useCallback((p) => setMotor((s) => ({ ...s, ...p })), []);
   const patchHydro = useCallback((p) => setHydro((s) => ({ ...s, ...p })), []);
   const patchDomain = useCallback((p) => setDomain((s) => ({ ...s, ...p })), []);
@@ -949,7 +1043,8 @@ function useDesignStore() {
   }, []);
 
   return { sim, patchSim, motor, patchMotor, hydro, patchHydro,
-    domain, patchDomain, layers, patchLayers, handoff, applyDesign };
+    domain, patchDomain, layers, patchLayers, handoff, applyDesign,
+    tubes, patchTube, setTubes, outerLocked, setOuterLocked, mech };
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1074,6 +1169,27 @@ function LayerRow({ on, onChange, name, desc, swatch, disabled }) {
   );
 }
 
+/** Numeric field that commits live while valid and never reformats under the
+ *  cursor: text is re-synced from `value` only while the field is NOT focused,
+ *  so typing "0.8" is not interrupted by an intermediate "0" being committed
+ *  and redisplayed as "0.000". Invalid text reverts on blur. */
+function NumField({ value, onCommit, min, max, step = 0.01, digits = 3, title }) {
+  const [txt, setTxt] = useState(value.toFixed(digits));
+  const focused = useRef(false);
+  useEffect(() => { if (!focused.current) setTxt(value.toFixed(digits)); }, [value, digits]);
+  return (
+    <input className="ctr-num" type="number" value={txt} step={step} min={min} max={max} title={title}
+      onFocus={() => { focused.current = true; }}
+      onBlur={() => { focused.current = false; setTxt(value.toFixed(digits)); }}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+      onChange={(e) => {
+        setTxt(e.target.value);
+        const v = parseFloat(e.target.value);
+        if (Number.isFinite(v) && v >= min && v <= max) onCommit(v);
+      }} />
+  );
+}
+
 /** Keeps a set of panel open/closed flags. */
 function usePanels(initial) {
   const [open, setOpen] = useState(initial);
@@ -1085,9 +1201,9 @@ function usePanels(initial) {
    7 · WORKSPACE A — INTERACTIVE 3D SIMULATOR
    ═══════════════════════════════════════════════════════════════ */
 function SimulatorWorkspace() {
-  const { sim, patchSim, handoff, layers, patchLayers, themeTick } = useDesign();
+  const { sim, patchSim, handoff, layers, patchLayers, themeTick, mech } = useDesign();
   const { alphaDeg, LcMm, extMm, k1, k2 } = sim;
-  const lambda = bifurcation(k1, k2, LcMm / 1000);
+  const lambda = bifurcation(k1, k2, LcMm / 1000, mech);
   const [sweeping, setSweeping] = useState(false);
   const [slow, setSlow] = useState(false);
   const [topView, setTopView] = useState(false);
@@ -1111,11 +1227,12 @@ function SimulatorWorkspace() {
   const [hud, setHud] = useState({ theta: 0, alpha: 0, kres: 0, V: 0, Vpp: 1, vel: 0, snapping: false });
 
   const P = useRef({ alpha: 0, lambda, k1, k2, Lc: LcMm / 1000, Lext: extMm / 1000,
-    sweeping: false, slow: false, layers });
+    sweeping: false, slow: false, layers, w1: mech.w1, w2: mech.w2, kScale: mech.kScale });
   useEffect(() => {
     P.current = { alpha: (alphaDeg * Math.PI) / 180, lambda, k1, k2,
-      Lc: LcMm / 1000, Lext: extMm / 1000, sweeping, slow, layers };
-  }, [alphaDeg, lambda, k1, k2, LcMm, extMm, sweeping, slow, layers]);
+      Lc: LcMm / 1000, Lext: extMm / 1000, sweeping, slow, layers,
+      w1: mech.w1, w2: mech.w2, kScale: mech.kScale };
+  }, [alphaDeg, lambda, k1, k2, LcMm, extMm, sweeping, slow, layers, mech]);
 
   const theta = useRef(0), vel = useRef(0), flash = useRef(0), subAccum = useRef(0);
   const snapEv = useRef(null), lastTip = useRef(null);   // in-flight snap, for the compass
@@ -1141,7 +1258,7 @@ function SimulatorWorkspace() {
      it is cleared rather than left to accumulate into a meaningless smear.
      Base twist alpha is deliberately NOT a dependency: sweeping alpha is
      precisely what draws the path. */
-  useEffect(() => { clearTracks(); }, [k1, k2, LcMm, extMm]);
+  useEffect(() => { clearTracks(); }, [k1, k2, LcMm, extMm, mech]);
 
   // Lighting a track layer restarts it; see makeTrack().enable.
   useEffect(() => { three.current.tracks?.tip.enable(layers.tipTrack); }, [layers.tipTrack]);
@@ -2279,7 +2396,7 @@ function SimulatorWorkspace() {
 
       const T = three.current;
       if (T.renderer) {
-        const { pts, Rtip, Rmid, nOverlap } = integrateShape(a, theta.current, p.k1, p.k2, p.Lc, p.Lext);
+        const { pts, Rtip, Rmid, nOverlap } = integrateShape(a, theta.current, p.k1, p.k2, p.Lc, p.Lext, p.w1, p.w2);
         const curve = new THREE.CatmullRomCurve3(pts);
         const swap = (m, geo) => { m.geometry.dispose(); m.geometry = geo; };
         // The sheath ends exactly where the OVERLAP ends — no arbitrary
@@ -2302,7 +2419,7 @@ function SimulatorWorkspace() {
             const dx = tipW.x - ev.pos.x, dz = tipW.z - ev.pos.z;
             // Physical scaling as in the optimiser: E_snap = dV * k_t / L_c.
             if (dE > 1e-6 && Math.hypot(dx, dz) > 0.5) {
-              T.compass?.add({ dx, dz, E: dE * NITINOL.kt / p.Lc });
+              T.compass?.add({ dx, dz, E: dE * p.kScale / p.Lc });
             }
           }
         }
@@ -2324,7 +2441,7 @@ function SimulatorWorkspace() {
           Rmid[1][0] * x + Rmid[1][1] * y,
           Rmid[2][0] * x + Rmid[2][1] * y
         ).normalize();
-        const rx = (p.k1 + p.k2 * Math.cos(th)) / 2, ry = (p.k2 * Math.sin(th)) / 2;
+        const rx = p.w1 * p.k1 + p.w2 * p.k2 * Math.cos(th), ry = p.w2 * p.k2 * Math.sin(th);
         const rmag = Math.hypot(rx, ry);
         // A zero-magnitude arrow still has to be hidden even when the layer is
         // lit: pointing it somewhere arbitrary would assert a direction the
@@ -2348,8 +2465,8 @@ function SimulatorWorkspace() {
       hudClock += dt;
       if (hudClock > 0.08) {
         hudClock = 0;
-        const kx = (p.k1 + p.k2 * Math.cos(theta.current)) / 2;
-        const ky = (p.k2 * Math.sin(theta.current)) / 2;
+        const kx = p.w1 * p.k1 + p.w2 * p.k2 * Math.cos(theta.current);
+        const ky = p.w2 * p.k2 * Math.sin(theta.current);
         setHud({ theta: theta.current, alpha: a, kres: Math.hypot(kx, ky),
           V: energy(theta.current, a, p.lambda), Vpp: stiffness(theta.current, p.lambda), vel: rate, snapping,
           compass: T.compass?.stats() });
@@ -2387,6 +2504,10 @@ function SimulatorWorkspace() {
               <span>κ₂ <b>{k2.toFixed(1)}</b> m⁻¹</span>
               <span><M>{'L_c'}</M> <b>{LcMm.toFixed(0)}</b> mm</span>
               <span><M>{'L_ext'}</M> <b>{extMm.toFixed(0)}</b> mm</span>
+              <span>OD <b>{(mech.t1.d_o * 1e3).toFixed(2)}</b>/<b>{(mech.t2.d_o * 1e3).toFixed(2)}</b> mm</span>
+              <span style={mech.outerLocked ? { color: C.gold } : undefined}>
+                outer <b style={mech.outerLocked ? { color: C.gold } : undefined}>{mech.outerLocked ? 'fully constrained' : 'clamped at base'}</b>
+              </span>
             </div>
           </div>
 
@@ -2550,7 +2671,8 @@ function OptimizerWorkspace() {
      app is edited here and read elsewhere, so there is exactly one definition
      of the robot at any moment. */
   const { applyDesign, sim, patchSim, motor, patchMotor, hydro, patchHydro,
-    domain, patchDomain, themeTick } = useDesign();
+    domain, patchDomain, themeTick, tubes, patchTube, setTubes, outerLocked, setOuterLocked,
+    mech } = useDesign();
   const { LcMm, extMm, k1, k2 } = sim;
   // Part 6: the allowable strain must be justified by a target cycle life,
   // not hardcoded to the 8% monotonic superelastic limit — at 8% the gate is
@@ -2566,20 +2688,21 @@ function OptimizerWorkspace() {
   const [hover, setHover] = useState(null);
   const [side, setSide] = useState(true);
   const [panels, togglePanel] = usePanels({
-    sweet: true, design: true, motor: false, water: false, domain: false,
+    sweet: true, design: true, tubes: true, motor: false, water: false, domain: false,
     tradeoff: false, safety: false,
   });
-  const designLambda = bifurcation(k1, k2, LcMm / 1000);
+  const designLambda = bifurcation(k1, k2, LcMm / 1000, mech);
 
   const targetLife = Math.pow(10, logLife);
   const strainLimit = epsAllowFor(targetLife);
   const strainPct = strainLimit * 100;
-  const kappaCeiling = (2 * strainLimit) / NITINOL.d_o;     // ε_bend = κ·d₀/2 ≤ ε_allow
+  // ε_bend = κ·d₀/2 ≤ ε_allow on the LARGER of the two tubes, which governs.
+  const kappaCeiling = strainLimit / mech.rMax;
   const kappaMax = clip ? Math.min(25, kappaCeiling) : 25;
 
   const grid = useMemo(() => buildGrid({
-    nx: GRID_N, ny: GRID_N, kappaMax, LcMin: 0.01, LcMax: LcMaxMm / 1000, strainLimit, etaK,
-  }), [kappaMax, LcMaxMm, strainLimit, etaK]);
+    nx: GRID_N, ny: GRID_N, kappaMax, LcMin: 0.01, LcMax: LcMaxMm / 1000, strainLimit, etaK, mech,
+  }), [kappaMax, LcMaxMm, strainLimit, etaK, mech]);
 
   const best = grid.best;
   const focus = hover || best;
@@ -3043,7 +3166,9 @@ function OptimizerWorkspace() {
     if (grid.maxScore > 0 && c.score > 0.3 * grid.maxScore) return { text: 'Workable', color: C.gold };
     return { text: 'Under-powered', color: C.dim };
   };
-  const fmtN = (n) => (!isFinite(n) ? '∞' : n >= 1e6 ? `${(n / 1e6).toPrecision(3)}e6` : n.toPrecision(3));
+  // toExponential, not toPrecision + a literal "e6": past 1e9 toPrecision
+  // itself switches to exponent form and produced strings like "4.86e+4e6".
+  const fmtN = (n) => (!isFinite(n) ? '∞' : n >= 1e6 ? n.toExponential(2) : n.toPrecision(3));
   const lifeCat = (n) => (n > 1e5 ? { t: 'High-cycle', c: C.green } : n > 1e3 ? { t: 'Low-cycle', c: C.gold } : { t: 'Immediate yielding', c: C.red });
 
   return (
@@ -3137,7 +3262,8 @@ function OptimizerWorkspace() {
           icon={<Ruler size={14} color={C.blue} />}
           right={`λ ${designLambda.toFixed(2)}`}>
           <p className="ctr-p" style={{ fontSize: 11.5 }}>
-            The geometry every other tab renders and evaluates. λ = (k_b/k_t)·L_c²·κ₁κ₂
+            The geometry every other tab renders and evaluates{outerLocked ? ', outer tube fully constrained' : ''}.
+            λ = C·L_c²·κ₁κ₂
             {' = '}<b style={{ color: designLambda > LAMBDA_CRIT ? C.gold : C.dim }}>{designLambda.toFixed(2)}</b>
             {designLambda > LAMBDA_CRIT ? ' — past the fold, so it snaps.' : ' — below π²/4, so it cannot snap.'}
           </p>
@@ -3159,6 +3285,96 @@ function OptimizerWorkspace() {
             κ₂ at full magnitude. It changes the shape and the swept track, but
             not λ — only the overlap stores the torsion that folds.
           </div>
+        </Panel>
+
+        <Panel title="Tubes & constraint" open={panels.tubes} onToggle={() => togglePanel('tubes')}
+          icon={<Boxes size={14} color={C.blue} />}
+          right={outerLocked ? 'outer locked' : 'outer free'}>
+          {(() => {
+            // Three linked fields per tube; any one can be edited and the
+            // other two follow. Wall = (OD − ID)/2. Editing OD holds the wall.
+            const row = (which, label) => {
+              const t = tubes[which], wall = (t.od - t.id) / 2;
+              return (
+                <React.Fragment key={which}>
+                  <span className="t">{label}</span>
+                  <NumField value={t.od} min={0.1} max={10} title="outer diameter, mm"
+                    onCommit={(od) => patchTube(which, { od, id: Math.max(0, od - 2 * wall) })} />
+                  <NumField value={t.id} min={0} max={t.od - 0.005} title="inner diameter, mm"
+                    onCommit={(id) => patchTube(which, { id })} />
+                  <NumField value={wall} min={0.005} max={t.od / 2} step={0.005} title="wall thickness, mm"
+                    onCommit={(w) => patchTube(which, { id: Math.max(0, t.od - 2 * w) })} />
+                </React.Fragment>
+              );
+            };
+            const lamFree = mech.Cfree * (LcMm / 1000) ** 2 * k1 * k2;
+            const lamLock = mech.Clocked * (LcMm / 1000) ** 2 * k1 * k2;
+            const verdict = (lam, act, name) => (
+              <div className={act ? 'act' : ''}>
+                <div className="cap-label">{name}</div>
+                <div className="mono t13" style={{ color: lam > LAMBDA_CRIT ? C.gold : C.dim }}>
+                  λ = {lam.toFixed(2)}
+                </div>
+                <div className="t11" style={{ color: lam > LAMBDA_CRIT ? C.gold : C.dim }}>
+                  {lam > LAMBDA_CRIT ? 'snaps' : 'no snap — below π²/4'}
+                </div>
+              </div>
+            );
+            return (
+              <>
+                <div className="ctr-sect">
+                  <span />
+                  <span className="h">OD mm</span><span className="h">ID mm</span><span className="h">wall mm</span>
+                  {row('outer', 'Outer · κ₁')}
+                  {row('inner', 'Inner fin · κ₂')}
+                </div>
+                <div className="mono t10" style={{ color: mech.clearance > 0 ? C.dim : C.unstable, lineHeight: 1.6 }}>
+                  Radial fit: outer ID − inner OD = {mech.clearance.toFixed(3)} mm
+                  {mech.clearance > 0 ? '' : ' — the inner tube does not fit inside the outer one.'}
+                </div>
+                <div className="mono t10 dim" style={{ lineHeight: 1.6 }}>
+                  k_b {(mech.t1.kb * 1e3).toFixed(3)} / {(mech.t2.kb * 1e3).toFixed(3)} mN·m² ·
+                  k_t {(mech.t1.kt * 1e3).toFixed(3)} / {(mech.t2.kt * 1e3).toFixed(3)} mN·m² (outer / inner)
+                </div>
+                <button className="ctr-link" onClick={() => setTubes(DEFAULT_TUBES)}>
+                  Reset to the original pair (1.02 / 0.82 mm, both)
+                </button>
+
+                <div className="cap-label" style={{ marginTop: 4 }}>Outer tube rotation</div>
+                <div className="ctr-seg">
+                  <button className={!outerLocked ? 'on' : ''} onClick={() => setOuterLocked(false)}>
+                    Clamped at base
+                  </button>
+                  <button className={outerLocked ? 'on' : ''} onClick={() => setOuterLocked(true)}>
+                    Fully constrained
+                  </button>
+                </div>
+                <p className="ctr-p" style={{ fontSize: 11.5 }}>
+                  Clamped at base: the outer tube is held at its base but can twist along its
+                  length, so the two tubes share the relative twist θ in series. Fully
+                  constrained: the outer tube cannot rotate anywhere along its length, so only
+                  the inner tube stores twist — its torsional compliance drops out of λ.
+                </p>
+                <div className="ctr-verdict">
+                  {verdict(lamFree, !outerLocked, 'clamped at base')}
+                  {verdict(lamLock, outerLocked, 'fully constrained')}
+                </div>
+                <p className="ctr-p" style={{ fontSize: 11.5 }}>
+                  Why the clamped λ does not move when you change a diameter: for two tubes of
+                  the same material, k_b/k_t = 1+ν for any circular section, and the
+                  stiffness ratios in λ cancel to exactly (1+ν)·L_c²·κ₁κ₂. The cross-sections
+                  still set the strain, the energy per snap, the bent shape — and how much
+                  locking the outer tube costs, which depends on how stiff it is relative
+                  to the fin:
+                </p>
+                <div className="mono t10 dim" style={{ lineHeight: 1.6 }}>
+                  Constraining the outer tube scales λ by k1t / (k1t + k2t) ={' '}
+                  {(mech.Clocked / mech.Cfree).toFixed(3)}. It snaps when constrained only if the
+                  free design reaches λ &gt; {(LAMBDA_CRIT * mech.Cfree / mech.Clocked).toFixed(2)}.
+                </div>
+              </>
+            );
+          })()}
         </Panel>
 
         <Panel title="Motor" open={panels.motor} onToggle={() => togglePanel('motor')}
@@ -3232,8 +3448,8 @@ function OptimizerWorkspace() {
             </span>
           </label>
           <div className="mono t10 dim">
-            d₀ {(NITINOL.d_o * 1e3).toFixed(2)} mm · kt {(NITINOL.kt * 1e3).toFixed(2)} mN·m² ·
-            kb/kt {C_STIFF.toFixed(2)} · grid {GRID_N}×{GRID_N}
+            λ/(L²κ₁κ₂) {mech.C.toFixed(3)} · energy scale {(mech.kScale * 1e3).toFixed(3)} mN·m² ·
+            grid {GRID_N}×{GRID_N}
           </div>
         </Panel>
 
@@ -3312,14 +3528,14 @@ function OptimizerWorkspace() {
    physical robot. They now come from the shared store and are edited in one
    place; what is left on this tab is the derived performance. */
 function PropulsionWorkspace() {
-  const { sim, motor, hydro, themeTick } = useDesign();
+  const { sim, motor, hydro, themeTick, mech } = useDesign();
   const { LcMm, k1, k2 } = sim;
-  const lambda = bifurcation(k1, k2, LcMm / 1000);
+  const lambda = bifurcation(k1, k2, LcMm / 1000, mech);
   const Lc = LcMm / 1000;
   const [side, setSide] = useState(true);
   const [panels, togglePanel] = usePanels({ nosnap: true, energy: true, torque: true, thrust: true, inputs: false });
 
-  const R = useMemo(() => propulsion(lambda, Lc, motor, hydro), [lambda, Lc, motor, hydro]);
+  const R = useMemo(() => propulsion(lambda, Lc, motor, hydro, mech), [lambda, Lc, motor, hydro, mech]);
 
   const canvasRef = useRef(null);
   useEffect(() => {
@@ -3482,6 +3698,9 @@ function PropulsionWorkspace() {
             <span>ω₀ <b>{motor.rpmNoLoad}</b> RPM · ω <b>{motor.rpm}</b> RPM · τ <b>{motor.stall}</b> N·mm</span>
             <span>w <b>{hydro.finW}</b> mm · C_d <b>{hydro.Cd}</b> · ρ <b>{hydro.rho}</b> kg/m³ · n <b>{hydro.nFins}</b></span>
             <span>A <b>{hydro.area}</b> cm² · C_D <b>{hydro.bodyCd}</b></span>
+            <span>OD/ID outer <b>{(mech.t1.d_o * 1e3).toFixed(2)}/{(mech.t1.d_i * 1e3).toFixed(2)}</b> ·
+              inner <b>{(mech.t2.d_o * 1e3).toFixed(2)}/{(mech.t2.d_i * 1e3).toFixed(2)}</b> mm ·
+              outer <b>{mech.outerLocked ? 'locked' : 'free'}</b></span>
           </div>
           <p className="ctr-p" style={{ fontSize: 11.5 }}>
             Change any of these under <b>Motor</b>, <b>Water</b> or <b>Current design</b> on the
