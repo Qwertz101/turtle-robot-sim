@@ -5,6 +5,7 @@ import {
   Play, Pause, RotateCcw, Zap, Activity, Sliders, Gauge, AlertTriangle,
   Boxes, Target, ArrowUpRight, ShieldAlert, Waves,
   Layers, ChevronDown, ChevronLeft, ChevronRight, Ruler,
+  CircleDot, Waypoints, MoveUpRight, Compass,
 } from 'lucide-react';
 
 /* ═══════════════════════════════════════════════════════════════
@@ -245,7 +246,7 @@ const CSS = `
   box-shadow:0 6px 20px rgba(0,0,0,.35);}
 .ctr-layers-btn:hover{border-color:var(--rams-500);}
 .ctr-layers-btn .cnt{font-family:var(--font-mono);font-size:10.5px;color:var(--rams-700);}
-.ctr-layers-card{width:296px;max-height:min(58vh,430px);overflow-y:auto;
+.ctr-layers-card{width:248px;max-height:min(58vh,430px);overflow-y:auto;
   border-radius:10px;background:var(--surface);border:1px solid var(--line-300);
   box-shadow:0 14px 40px rgba(0,0,0,.5);padding-bottom:6px;}
 .ctr-layers-card .hd{display:flex;align-items:center;gap:7px;padding:11px 13px 9px;
@@ -261,6 +262,14 @@ const CSS = `
 .ctr-layer-empty{padding:2px 13px 10px;font-size:10.5px;line-height:1.55;
   color:var(--ink-600);font-style:italic;}
 .ctr-key{display:inline-block;width:18px;height:3px;border-radius:2px;flex-shrink:0;}
+.ctr-lyr-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:0 10px 4px;}
+.ctr-lyr{display:flex;flex-direction:column;align-items:center;gap:4px;padding:9px 4px 7px;
+  border-radius:8px;border:1px solid var(--line-300);background:var(--paper-100);
+  color:var(--ink-600);cursor:pointer;font-size:10.5px;line-height:1.2;text-align:center;
+  transition:border-color .15s,color .15s;}
+.ctr-lyr:hover:not(:disabled){color:var(--ink-900);}
+.ctr-lyr.on{background:var(--surface);}
+.ctr-lyr:disabled{opacity:.4;cursor:default;}
 
 /* Spec strip: what the scene is currently showing, read-only. The numbers are
    set on the optimisation tab, so editing them here would contradict the
@@ -512,16 +521,22 @@ const fatigueLife = (e) => (e > 0 ? 10 * Math.pow(e, -5) : Infinity);
        λ = L_c²·κ₁κ₂ · [k1b·k2b / (k1b + k2b)] · [1/k1t + 1/k2t]
 
    The last bracket is the torsional COMPLIANCE of the relative twist θ: the
-   two tubes carry it in series, like two springs end to end. That is where
-   the "fully constrained outer tube" option enters. Locking the outer tube
-   against rotation along its whole length makes it torsionally rigid, so its
-   term 1/k1t drops out and only the inner tube can store twist:
+   two tubes carry it in series, like two springs end to end.
 
-       λ_locked = L_c²·κ₁κ₂ · [k1b·k2b / (k1b + k2b)] · [1/k2t]
+   "Fully constrained" outer tube = a RIGID outer tube: it can neither twist
+   nor bend, i.e. the limit k1b, k1t -> infinity. Both brackets change:
+     · k1b·k2b/(k1b+k2b) -> k2b   the fin can no longer bend the sheath, so
+                                  it takes the whole curvature mismatch
+     · 1/k1t + 1/k2t      -> 1/k2t only the fin stores twist
 
-   Less compliance means a smaller λ -- for identical tubes exactly half. A
-   design sitting at 2.5 < λ < 4.9 snaps when free and does NOT snap when the
-   outer tube is locked.
+       λ_rigid = L_c²·κ₁κ₂ · k2b / k2t = (1+ν)·L_c²·κ₁κ₂  (any Nitinol fin)
+
+   For two tubes of the same material this equals the free λ EXACTLY: the
+   stiffer coupling and the smaller compliance cancel. Rigidity therefore
+   does not decide whether the fin snaps -- it changes what the snap looks
+   like (the overlap holds the sheath's arc; only the free fin moves) and how
+   much energy each snap carries. (Locking torsion ALONE, with the sheath
+   still free to bend, would halve λ -- that is a different device.)
 
    Energy scale. The rules give E_J = ΔV·(k_t/L_c) with the SHARED k_t of the
    equal-stiffness case. Its general form here is 2·k_eff/L_c, where
@@ -544,13 +559,17 @@ function pairMechanics(tubes, outerLocked) {
   const complFree = 1 / t1.kt + 1 / t2.kt;
   const complLocked = 1 / t2.kt;
   const compl = outerLocked ? complLocked : complFree;
+  const Cfree = kbRed * complFree, Clocked = t2.kb * complLocked;
   return {
     t1, t2, outerLocked,
-    C: kbRed * compl,                     // λ = C·L_c²·κ₁κ₂
-    Cfree: kbRed * complFree, Clocked: kbRed * complLocked,
+    C: outerLocked ? Clocked : Cfree,     // λ = C·L_c²·κ₁κ₂
+    Cfree, Clocked,
     // Part 5 weights: curvature of the overlap is the bending-stiffness
     // weighted sum of the two precurvature vectors (1/2, 1/2 only if equal).
-    w1: t1.kb / (t1.kb + t2.kb), w2: t2.kb / (t1.kb + t2.kb),
+    // A rigid sheath has infinite weight: w1 = 1, w2 = 0, so the overlap is
+    // exactly the sheath's own arc and does not move with θ.
+    w1: outerLocked ? 1 : t1.kb / (t1.kb + t2.kb),
+    w2: outerLocked ? 0 : t2.kb / (t1.kb + t2.kb),
     kScale: 2 / compl,                    // N·m²; E_J = ΔV·kScale/L_c (see above)
     rMax: Math.max(t1.r, t2.r),
     clearance: tubes.outer.id - tubes.inner.od,   // mm; must be > 0 to nest
@@ -570,7 +589,7 @@ function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech) {
   const lambda = mech.C * Lc * Lc * kappa * kappa;     // κ₁ = κ₂ = κ (sweep diagonal)
   // Bending strain per tube, ε = κ·d_o/2 on each tube's OWN diameter (Part 6:
   // never mix diameters); the larger governs.
-  const eb = kappa * mech.rMax;
+  const eb = kappa * (mech.outerLocked ? mech.t2.r : mech.rMax);
   const base = {
     kappa, Lc, lambda, eb, gamma: 0, eeq: eb, dE: 0, dE_J: 0, Win: 0, eta: 0,
     score: 0, thetaPeak: 0, thetaStable: 0, stored_J: 0, N: fatigueLife(eb), regime: 'stable',
@@ -607,7 +626,8 @@ function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech) {
   const g2 = dth * mech.t2.r;
   // Approximate combined-strain metric (Part 6). The 0.33 is a deliberate
   // stand-in for nu, NOT 1/3, and this is NOT the literature von Mises strain.
-  const e1 = Math.hypot(kappa * mech.t1.r, Math.sqrt(0.33) * g1);
+  // A rigid sheath does not deform in service, so it is not a fatigue site.
+  const e1 = mech.outerLocked ? 0 : Math.hypot(kappa * mech.t1.r, Math.sqrt(0.33) * g1);
   const e2 = Math.hypot(kappa * mech.t2.r, Math.sqrt(0.33) * g2);
   const eeq = Math.max(e1, e2);
   const gamma = Math.max(g1, g2);
@@ -1153,19 +1173,16 @@ function SideBar({ title, open, onToggle, scroll, children }) {
 }
 
 /** One row of the data-layer switchboard. */
-function LayerRow({ on, onChange, name, desc, swatch, disabled }) {
+/** One layer toggle: a symbol and a short label. The full explanation lives
+ *  in the tooltip, so the card stays scannable. */
+function LayerRow({ on, onChange, name, desc, icon: Icon, color, disabled }) {
   return (
-    <label className="ctr-layer" style={disabled ? { opacity: 0.45, cursor: 'default' } : undefined}>
-      <input type="checkbox" checked={on} disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)} />
-      <span>
-        <span className="nm">
-          {swatch && <i className="ctr-key" style={{ background: swatch }} />}
-          <M>{name}</M>
-        </span>
-        <span className="ds"><M>{desc}</M></span>
-      </span>
-    </label>
+    <button type="button" className={`ctr-lyr${on ? ' on' : ''}`} disabled={disabled}
+      title={desc} aria-pressed={on} onClick={() => onChange(!on)}
+      style={on ? { borderColor: color, color } : undefined}>
+      <Icon size={18} />
+      <span>{name}</span>
+    </button>
   );
 }
 
@@ -2558,32 +2575,33 @@ function SimulatorWorkspace() {
                 <div className="hd"><Layers size={14} color={C.accent} /> Data layers</div>
 
                 <h3>Motion</h3>
-                <LayerRow on={layers.tipTrack} onChange={(v) => setLayer('tipTrack', v)}
-                  swatch={C.accent} name="Ground track · fin tip"
-                  desc="Floor projection of the distal fin tip, coloured by phase. Closed loop, never fades." />
-                <LayerRow on={layers.midTrack} onChange={(v) => setLayer('midTrack', v)}
-                  swatch={C.cyan} name="Ground track · end of overlap L_c"
-                  desc="Same projection taken where the sheath releases the fin. Light both to compare swept areas." />
-                <LayerRow on={layers.vectors} onChange={(v) => setLayer('vectors', v)}
-                  swatch={C.ink} name="Curvature vectors"
-                  desc="κ₁, κ₂ and their resultant at the end of the overlap." />
-
-                <div className="sep" />
+                <div className="ctr-lyr-grid">
+                  <LayerRow on={layers.tipTrack} onChange={(v) => setLayer('tipTrack', v)}
+                    icon={CircleDot} color={C.accent} name="Tip path"
+                    desc="Floor projection of the fin tip's path, coloured by phase (build-up / snap). Never fades." />
+                  <LayerRow on={layers.midTrack} onChange={(v) => setLayer('midTrack', v)}
+                    icon={Waypoints} color={C.cyan} name="Overlap path"
+                    desc="Floor projection of the end of the overlap, where the sheath releases the fin." />
+                  <LayerRow on={layers.vectors} onChange={(v) => setLayer('vectors', v)}
+                    icon={MoveUpRight} color={C.ink} name="Curvature"
+                    desc="κ₁, κ₂ and their resultant at the end of the overlap." />
+                </div>
                 <h3>Energy</h3>
-                <LayerRow on={layers.compass} onChange={(v) => setLayer('compass', v)}
-                  swatch={C.gold} name="Net snap vector"
-                  desc="Each snap as a vector at the base: direction = the tip's displacement over the release, length = energy released (mJ). The bold arrow is their sum; 'align' = |Σ| / ΣE." />
-                <LayerRow on={layers.headingUp} onChange={(v) => setLayer('headingUp', v)}
-                  disabled={!layers.compass}
-                  swatch={C.accent} name="Plan view · net vector right"
-                  desc="Compass heading-up mode: turn the top-down view so the net snap vector points screen-right. Off = north-up (nearest cardinal)." />
+                <div className="ctr-lyr-grid">
+                  <LayerRow on={layers.compass} onChange={(v) => setLayer('compass', v)}
+                    icon={Zap} color={C.gold} name="Net snap"
+                    desc="Each snap as a vector (direction of the tip's release, length = energy). Bold arrow = their sum; 'align' = |Σ| / ΣE." />
+                  <LayerRow on={layers.headingUp} onChange={(v) => setLayer('headingUp', v)}
+                    disabled={!layers.compass} icon={Compass} color={C.accent} name="Snap → right"
+                    desc="Turn the top-down view so the net snap points screen-right. Off = north-up. Needs Net snap." />
+                </div>
 
                 {(anyTrack || layers.compass) && (
                   <>
                     <div className="sep" />
                     <button className="ctr-btn" style={{ margin: '4px 13px 6px', width: 'calc(100% - 26px)' }}
                       onClick={clearTracks}>
-                      <RotateCcw size={13} /> Clear tracks &amp; snaps
+                      <RotateCcw size={13} /> Clear
                     </button>
                   </>
                 )}
@@ -2697,7 +2715,7 @@ function OptimizerWorkspace() {
   const strainLimit = epsAllowFor(targetLife);
   const strainPct = strainLimit * 100;
   // ε_bend = κ·d₀/2 ≤ ε_allow on the LARGER of the two tubes, which governs.
-  const kappaCeiling = strainLimit / mech.rMax;
+  const kappaCeiling = strainLimit / (mech.outerLocked ? mech.t2.r : mech.rMax);
   const kappaMax = clip ? Math.min(25, kappaCeiling) : 25;
 
   const grid = useMemo(() => buildGrid({
@@ -3350,28 +3368,23 @@ function OptimizerWorkspace() {
                   </button>
                 </div>
                 <p className="ctr-p" style={{ fontSize: 11.5 }}>
-                  Clamped at base: the outer tube is held at its base but can twist along its
-                  length, so the two tubes share the relative twist θ in series. Fully
-                  constrained: the outer tube cannot rotate anywhere along its length, so only
-                  the inner tube stores twist — its torsional compliance drops out of λ.
+                  Clamped at base: the outer tube can twist and bend along its length, so the
+                  overlap's shape changes as the fin turns. Fully constrained: the outer tube
+                  is rigid — it holds its own precurved arc, the fin conforms to it, and only
+                  the fin beyond the sheath moves.
                 </p>
                 <div className="ctr-verdict">
                   {verdict(lamFree, !outerLocked, 'clamped at base')}
                   {verdict(lamLock, outerLocked, 'fully constrained')}
                 </div>
                 <p className="ctr-p" style={{ fontSize: 11.5 }}>
-                  Why the clamped λ does not move when you change a diameter: for two tubes of
-                  the same material, k_b/k_t = 1+ν for any circular section, and the
-                  stiffness ratios in λ cancel to exactly (1+ν)·L_c²·κ₁κ₂. The cross-sections
-                  still set the strain, the energy per snap, the bent shape — and how much
-                  locking the outer tube costs, which depends on how stiff it is relative
-                  to the fin:
+                  Same λ in both modes, for any diameters: with both tubes Nitinol,
+                  k_b/k_t = 1+ν for every circular section, so λ = (1+ν)·L_c²·κ₁κ₂ whether
+                  the sheath is compliant or rigid. A rigid sheath stops the fin sharing its
+                  twist (less compliance) but also stops it bending the sheath (stronger
+                  coupling), and the two cancel. Whether it snaps is unchanged; the shape,
+                  strain and energy per snap are not.
                 </p>
-                <div className="mono t10 dim" style={{ lineHeight: 1.6 }}>
-                  Constraining the outer tube scales λ by k1t / (k1t + k2t) ={' '}
-                  {(mech.Clocked / mech.Cfree).toFixed(3)}. It snaps when constrained only if the
-                  free design reaches λ &gt; {(LAMBDA_CRIT * mech.Cfree / mech.Clocked).toFixed(2)}.
-                </div>
               </>
             );
           })()}
