@@ -5,8 +5,12 @@ import {
   Play, Pause, RotateCcw, Zap, Activity, Sliders, Gauge, AlertTriangle,
   Boxes, Target, ArrowUpRight, ShieldAlert, Waves,
   Layers, ChevronDown, ChevronLeft, ChevronRight, Ruler,
-  CircleDot, Waypoints, MoveUpRight, Compass,
+  CircleDot, Waypoints, MoveUpRight, Compass, Keyboard, BookOpen,
 } from 'lucide-react';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
+import CitationsPage from './CitationsPage.jsx';
+import { EQ_BY_ID, EQ_NUM, KIND, REF_BY_KEY } from './citations.js';
 
 /* ═══════════════════════════════════════════════════════════════
    1 · STYLE SHEET — Riverside Labs brand system
@@ -237,6 +241,51 @@ const CSS = `
    layer is an independent read on the SAME configuration. Anchored bottom
    left over the viewport rather than docked in the sidebar, so it stays
    reachable when the sidebar is collapsed. */
+.ctr-tl{position:absolute;z-index:14;left:12px;top:12px;display:flex;flex-direction:column;
+  align-items:flex-start;gap:8px;max-width:calc(100% - 24px);}
+.ctr-eff{width:236px;padding:10px 12px 9px;border-radius:10px;background:var(--surface);
+  border:1px solid var(--line-300);box-shadow:0 6px 20px rgba(0,0,0,.35);}
+.ctr-eff .v{font-family:var(--font-mono);font-size:24px;line-height:1.1;color:var(--ink-900);
+  font-variant-numeric:tabular-nums;}
+.ctr-eff .bar{position:relative;height:5px;border-radius:3px;margin:7px 0 6px;
+  background:var(--paper-100);border:1px solid var(--line-300);overflow:hidden;}
+.ctr-eff .bar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;}
+.ctr-eff .bar b{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink-600);}
+.ctr-eff .ft{font-family:var(--font-mono);font-size:10px;line-height:1.6;color:var(--ink-600);}
+.ctr-help-btn{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:7px;
+  cursor:pointer;font-family:var(--font-mono);font-size:10px;color:var(--ink-600);
+  background:var(--surface);border:1px solid var(--line-300);}
+.ctr-help-btn:hover,.ctr-help-btn.on{color:var(--ink-900);border-color:var(--rams-500);}
+.ctr-help{padding:8px 11px;border-radius:8px;background:var(--surface);
+  border:1px solid var(--line-300);font-family:var(--font-mono);font-size:10px;line-height:1.7;
+  color:var(--ink-600);}
+/* A calculated number that links to its citation. */
+.ctr-cx{cursor:pointer;pointer-events:auto;border-bottom:1px dotted color-mix(in srgb, currentColor 50%, transparent);}
+.ctr-cx:hover{border-bottom-style:solid;}
+.ctr-pop{position:fixed;z-index:200;width:340px;max-width:calc(100vw - 24px);padding:11px 13px 12px;
+  border-radius:9px;background:var(--surface);border:1px solid var(--line-300);border-left:4px solid var(--k);
+  box-shadow:0 14px 40px rgba(0,0,0,.45);color:var(--ink-900);font-family:var(--font-body);font-size:12px;}
+.ctr-pop .hd{display:flex;align-items:baseline;gap:8px;}
+.ctr-pop .k{font-family:KaTeX_Main,serif;font-variant:small-caps;font-weight:700;letter-spacing:.05em;color:var(--k);}
+.ctr-pop .n{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-600);}
+.ctr-pop .ttl{font-family:KaTeX_Main,serif;font-weight:700;font-size:14px;}
+.ctr-pop .eq{margin:9px 0 7px;overflow-x:auto;overflow-y:hidden;font-size:13.5px;padding-bottom:2px;}
+.ctr-pop .src{color:var(--ink-600);font-size:11px;line-height:1.5;margin-bottom:9px;}
+.ctr-pop .val{font-family:var(--font-mono);font-size:11px;color:var(--ink-600);}
+/* Typed specification fields and the axis-bounds table. */
+.ctr-fields{display:flex;flex-direction:column;gap:6px;}
+.ctr-field{display:grid;grid-template-columns:minmax(0,1fr) 86px 30px;gap:8px;align-items:center;
+  font-size:12px;color:var(--ink-600);}
+.ctr-field .l i{font-style:normal;color:var(--ink-900);margin-left:3px;}
+.ctr-field .u,.ctr-axes .u{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-600);}
+.ctr-axes{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,1fr) 30px;gap:6px 8px;align-items:center;}
+.ctr-axes .h{font-weight:500;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-600);text-align:center;}
+.ctr-axes .t{font-size:11.5px;color:var(--ink-900);white-space:nowrap;}
+.ctr-scorecard{pointer-events:auto;margin-top:10px;padding:8px 11px 7px;border-radius:8px;cursor:pointer;
+  background:color-mix(in srgb, var(--surface) 88%, transparent);border:1px solid var(--line-300);
+  color:var(--ink-900);max-width:330px;}
+.ctr-scorecard:hover{border-color:var(--rams-500);}
+.ctr-scorecard .katex{font-size:1.12em;}
 .ctr-layers{position:absolute;z-index:14;left:14px;bottom:14px;display:flex;
   flex-direction:column;align-items:flex-start;gap:8px;}
 .ctr-layers-btn{display:inline-flex;align-items:center;gap:7px;padding:8px 12px;
@@ -471,6 +520,205 @@ function integrateShape(alpha, thetaTip, k1, k2, Lc, Lext, w1 = 0.5, w2 = 0.5) {
   return { pts, Rtip: R, Rmid, nOverlap };
 }
 
+/** The fin tip alone, in millimetres in the robot's local frame: the same
+ *  Bishop-frame march as integrateShape (the extension summed in closed
+ *  form), with the frame held in nine scalars and nothing allocated. The snap-path efficiency needs
+ *  a few hundred tips per design and the optimiser sweeps 2500 designs, so
+ *  building curves there is not an option. Writes into `out` = [x, y, z]. */
+function tipPoint(alpha, thetaTip, k1, k2, Lc, Lext, w1, w2, out) {
+  let r00 = 1, r01 = 0, r02 = 0, r10 = 0, r11 = 1, r12 = 0, r20 = 0, r21 = 0, r22 = 1;
+  let px = 0, py = 0, pz = 0;
+  const step = (Kx, Ky, ds) => {
+    px += r02 * ds; py += r12 * ds; pz += r22 * ds;
+    const vx = Kx * ds, vy = Ky * ds, phi = Math.hypot(vx, vy);
+    if (phi < 1e-12) return;
+    // rodrigues(vx, vy, 0), then R = R·Q
+    const kx = vx / phi, ky = vy / phi, s = Math.sin(phi), c = Math.cos(phi), t = 1 - c;
+    const q00 = t * kx * kx + c, q01 = t * kx * ky, q02 = s * ky;
+    const q10 = q01, q11 = t * ky * ky + c, q12 = -s * kx;
+    const q20 = -s * ky, q21 = s * kx, q22 = c;
+    let a = r00, b = r01, d = r02;
+    r00 = a * q00 + b * q10 + d * q20; r01 = a * q01 + b * q11 + d * q21; r02 = a * q02 + b * q12 + d * q22;
+    a = r10; b = r11; d = r12;
+    r10 = a * q00 + b * q10 + d * q20; r11 = a * q01 + b * q11 + d * q21; r12 = a * q02 + b * q12 + d * q22;
+    a = r20; b = r21; d = r22;
+    r20 = a * q00 + b * q10 + d * q20; r21 = a * q01 + b * q11 + d * q21; r22 = a * q02 + b * q12 + d * q22;
+  };
+  const ds = Lc / N_STEPS;
+  // θ(s) is linear along the overlap, so cos θ / sin θ advance by a fixed
+  // rotation per step rather than two fresh trig calls.
+  const dth = (thetaTip - alpha) / N_STEPS, cd = Math.cos(dth), sd = Math.sin(dth);
+  let ct = Math.cos(alpha), st = Math.sin(alpha);
+  for (let i = 0; i < N_STEPS; i++) {
+    step(w1 * k1 + w2 * k2 * ct, w2 * k2 * st, ds);
+    const c2 = ct * cd - st * sd; st = st * cd + ct * sd; ct = c2;
+  }
+  if (Lext > 1e-6) {
+    // The extension has CONSTANT curvature, so its M identical steps
+    // R_i = R0·Q^i can be summed in closed form instead of marched:
+    // Q turns about k = (kx, ky, 0) by φ, so Q^i·e3 = e3·cos iφ + (k×e3)·sin iφ
+    // and Σ_{i<M} is a pair of trigonometric geometric series. Same numbers
+    // as the march in integrateShape, to rounding.
+    const M = Math.max(4, Math.min(120, Math.round(N_STEPS * (Lext / Math.max(Lc, 1e-4)))));
+    const de = Lext / M;
+    const Kx = k2 * Math.cos(thetaTip), Ky = k2 * Math.sin(thetaTip);
+    const phi = Math.hypot(Kx, Ky) * de;
+    let sx, sy, sz;                       // Σ Q^i·e3, in the frame at the sheath's end
+    if (phi < 1e-9) { sx = 0; sy = 0; sz = M; }
+    else {
+      const h = Math.sin(phi / 2), A = Math.sin((M * phi) / 2) / h;
+      const C = A * Math.cos(((M - 1) * phi) / 2), S = A * Math.sin(((M - 1) * phi) / 2);
+      const kx = (Kx * de) / phi, ky = (Ky * de) / phi;
+      sx = ky * S; sy = -kx * S; sz = C;   // k×e3 = (ky, −kx, 0)
+    }
+    px += (r00 * sx + r01 * sy + r02 * sz) * de;
+    py += (r10 * sx + r11 * sy + r12 * sz) * de;
+    pz += (r20 * sx + r21 * sy + r22 * sz) * de;
+  }
+  out[0] = px * M2MM; out[1] = py * M2MM; out[2] = pz * M2MM;
+  return out;
+}
+
+/* ── Snap propulsion efficiency ───────────────────────────────────────────
+   A snap is not a straight shove: during the release the tip sweeps an ARC,
+   and parts of that arc can swing sideways or back against the rest. The
+   efficiency asks how much of the snap's energy ends up pushing along the
+   net direction.
+
+   The stroke is cut into short pieces. Each piece k moves the tip along a
+   floor direction d̂_k and gives up an amount of elastic energy ΔE_k (the
+   drop in V over that piece, at the motor angle the snap happened at): that
+   energy is what the piece has to push water with, so it is the natural
+   weight -- a piece that sweeps a long way while releasing almost nothing
+   pushes almost nothing.
+
+     net direction   n̂ ∝ Σ ΔE_k·d̂_k          (over every snap recorded)
+     forward         F = Σ ΔE_k·max( d̂_k·n̂, 0)
+     backward        B = Σ ΔE_k·max(−d̂_k·n̂, 0)
+     total           E = Σ ΔE_k
+     efficiency      η = (F − B) / E
+
+   The denominator is the WHOLE snap, not just its parallel part: energy
+   spent swinging sideways is energy that did not go forward, so it counts
+   against η. A snap that runs in a straight line along n̂ scores 100%; one
+   that is 60% forward and 40% straight back scores 20%, the backward push
+   cancelling an equal forward one; a snap that swings far out sideways and
+   back while creeping forward scores low even though almost none of it is
+   backward. (An earlier version divided by F + B, the parallel part only,
+   and so called a sideways swing with a small forward drift ~98%.) What is
+   not forward is split for display as back = B/E and sideways = 1 − (F+B)/E.
+
+   The path is the quasi-static one: at fixed α, θ runs from where the snap
+   left to where it lands, and the tip shape is a pure function of (α, θ). */
+
+/** Where a snap starts and lands, for a forward sweep of α. null below the
+ *  fold, where there is no snap. */
+function foldSnap(lambda) {
+  if (!(lambda > LAMBDA_CRIT)) return null;
+  const thetaPeak = Math.acos(-1 / lambda);              // fold: V″ = 0
+  const alphaSnap = thetaPeak + lambda * Math.sin(thetaPeak);
+  const g = (t) => t - alphaSnap + lambda * Math.sin(t);
+  for (let t = thetaPeak + 0.02; t < thetaPeak + 6 * Math.PI; t += 0.02) {
+    if (g(t) > 0 && stiffness(t, lambda) > 0) {
+      let lo = t - 0.02, hi = t;
+      for (let k = 0; k < 40; k++) {
+        const m = (lo + hi) / 2;
+        if (g(m) > 0) hi = m; else lo = m;
+      }
+      return { thetaPeak, alphaSnap, thetaStable: (lo + hi) / 2 };
+    }
+  }
+  return null;
+}
+
+/** The minimum θ settles into from θ0 at fixed α: descent of V, Newton where
+ *  V is convex (fast and stable at any λ), a plain gradient step elsewhere,
+ *  each step capped so it cannot hop a basin. */
+function settle(th0, a, lambda) {
+  let th = th0;
+  for (let i = 0; i < 20000; i++) {
+    const g = gradient(th, a, lambda), k = stiffness(th, lambda);
+    if (Math.abs(g) < 1e-10 && k > 0) break;
+    th += Math.max(-0.05, Math.min(0.05, k > 0.5 ? -g / k : -0.5 * g));
+  }
+  return th;
+}
+
+/** Sample a snap's floor path θ0 → θ1. `at(θ)` returns [u, v, V]: floor
+ *  coordinates and potential. Uniform in θ is not enough -- at large λ the
+ *  tip runs tight little hooks that a coarse polyline cuts straight across,
+ *  hiding exactly the backward motion being measured -- so each of 10 base
+ *  pieces is bisected wherever its midpoint strays from its chord. Within
+ *  ~0.01 of a dense reference over the whole design sweep (worst cell 0.014). */
+function snapStroke(at, th0, th1) {
+  const out = [at(th0)];
+  const rec = (ta, pa, tb, pb, depth) => {
+    const tm = (ta + tb) / 2, pm = at(tm);
+    const dev = Math.hypot(pm[0] - (pa[0] + pb[0]) / 2, pm[1] - (pa[1] + pb[1]) / 2);
+    const chord = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
+    if (depth < 6 && dev > 0.12 * chord + 1e-7) {
+      rec(ta, pa, tm, pm, depth + 1); rec(tm, pm, tb, pb, depth + 1);
+    } else out.push(pm, pb);
+  };
+  const BASE = 10;
+  let ta = th0, pa = out[0];
+  for (let k = 1; k <= BASE; k++) {
+    const tb = th0 + ((th1 - th0) * k) / BASE, pb = at(tb);
+    rec(ta, pa, tb, pb, 0);
+    ta = tb; pa = pb;
+  }
+  return out;
+}
+
+/** Pieces of a stroke as {u, v, e}: unit floor direction and energy given up. */
+function strokePieces(pts) {
+  const out = [];
+  for (let k = 0; k + 1 < pts.length; k++) {
+    const du = pts[k + 1][0] - pts[k][0], dv = pts[k + 1][1] - pts[k][1];
+    const L = Math.hypot(du, dv);
+    const e = pts[k][2] - pts[k + 1][2];
+    // Energy climbed back (e < 0) is not a push; a piece that barely moves
+    // has no direction to speak of.
+    if (L > 1e-9 && e > 0) out.push({ u: du / L, v: dv / L, e });
+  }
+  return out;
+}
+
+/** Σ e·d̂ of a set of pieces: the stroke's push, as a floor vector. */
+function strokeVector(pieces) {
+  let u = 0, v = 0;
+  for (const p of pieces) { u += p.e * p.u; v += p.e * p.v; }
+  return [u, v];
+}
+
+/** η = (F − B)/E of `pieces` along the unit direction (nu, nv). */
+function forwardShare(pieces, nu, nv) {
+  let F = 0, B = 0, E = 0;
+  for (const p of pieces) {
+    const c = p.u * nu + p.v * nv;
+    if (c > 0) F += p.e * c; else B -= p.e * c;
+    E += p.e;
+  }
+  return { F, B, E, eta: E > 0 ? (F - B) / E : 0 };
+}
+
+/** Efficiency of one design's snap, straight from the model. Floor frame is
+ *  the robot's local (x, y): η is invariant to how the floor is rotated. */
+function snapEfficiency(lambda, k1, k2, Lc, Lext, mech, fold = foldSnap(lambda)) {
+  if (!fold) return null;
+  const { thetaPeak, alphaSnap, thetaStable } = fold;
+  const tmp = [0, 0, 0];
+  const pts = snapStroke((th) => {
+    tipPoint(alphaSnap, th, k1, k2, Lc, Lext, mech.w1, mech.w2, tmp);
+    return [tmp[0], tmp[1], energy(th, alphaSnap, lambda)];
+  }, thetaPeak, thetaStable);
+  const pieces = strokePieces(pts);
+  const [u, v] = strokeVector(pieces);
+  const n = Math.hypot(u, v);
+  if (n < 1e-12) return { eta: 0, F: 0, B: 0, E: 0 };
+  return forwardShare(pieces, u / n, v / n);
+}
+
 /* ═══════════════════════════════════════════════════════════════
    4 · DESIGN ENGINE — nitinol fin optimisation
    ═══════════════════════════════════════════════════════════════ */
@@ -585,37 +833,25 @@ const DEFAULT_TUBES = { outer: { od: 1.02, id: 0.82 }, inner: { od: 1.02, id: 0.
  *  on the diagonal κ₁ = κ₂ = κ (Part 2 rule: stated explicitly). */
 const bifurcation = (k1, k2, Lc, mech) => mech.C * Lc * Lc * k1 * k2;
 
-function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech) {
+function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech, Lext = 0) {
   const lambda = mech.C * Lc * Lc * kappa * kappa;     // κ₁ = κ₂ = κ (sweep diagonal)
   // Bending strain per tube, ε = κ·d_o/2 on each tube's OWN diameter (Part 6:
   // never mix diameters); the larger governs.
   const eb = kappa * (mech.outerLocked ? mech.t2.r : mech.rMax);
   const base = {
     kappa, Lc, lambda, eb, gamma: 0, eeq: eb, dE: 0, dE_J: 0, Win: 0, eta: 0,
+    etaP: 0, prod_J: 0,
     score: 0, thetaPeak: 0, thetaStable: 0, stored_J: 0, N: fatigueLife(eb), regime: 'stable',
   };
-  if (lambda <= LAMBDA_CRIT) return base;
-
-  const thetaPeak = Math.acos(-1 / lambda);              // fold: V″ = 0
-  const alphaSnap = thetaPeak + lambda * Math.sin(thetaPeak);
-  const g = (t) => t - alphaSnap + lambda * Math.sin(t);
-
-  let thetaStable = null;
-  for (let t = thetaPeak + 0.02; t < thetaPeak + 6 * Math.PI; t += 0.02) {
-    if (g(t) > 0 && stiffness(t, lambda) > 0) {
-      let lo = t - 0.02, hi = t;
-      for (let k = 0; k < 40; k++) {
-        const m = (lo + hi) / 2;
-        if (g(m) > 0) hi = m; else lo = m;
-      }
-      thetaStable = (lo + hi) / 2;
-      break;
-    }
-  }
-  if (thetaStable === null) return base;
+  const fold = foldSnap(lambda);
+  if (!fold) return base;
+  const { thetaPeak, alphaSnap, thetaStable } = fold;
 
   const dE = energy(thetaPeak, alphaSnap, lambda) - energy(thetaStable, alphaSnap, lambda);
   const scale = mech.kScale / Lc;
+  // Snap propulsion efficiency: the share of the snap's arc that pushes along
+  // its own net direction. It depends on the tip's path, so on L_ext too.
+  const etaP = Math.max(0, snapEfficiency(lambda, kappa, kappa, Lc, Lext, mech, fold)?.eta ?? 0);
   // Torsional strain per tube (Part 6 engineering estimate): the snap's angle
   // jump spread over L_c, times that tube's own radius. As in the rules, a
   // free tube is charged the FULL jump (a conservative bound -- in series
@@ -637,11 +873,15 @@ function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech) {
   // motivation only — which is exactly why it is exposed as a control rather
   // than buried as a literal. It carries units of 1/ΔE, so its numeric value
   // is only meaningful against the dimensionless ΔE.
-  const eta = 1 - Math.exp(-etaK * dE);
+  // Productive energy: only the share of the snap that pushes forward
+  // counts, in both the saturation term and the energy-per-work ratio.
+  const dEp = etaP * dE;
+  const eta = 1 - Math.exp(-etaK * dEp);
   const gate = Math.exp(-Math.pow(eeq / strainLimit, 4));
   return {
     kappa, Lc, lambda, eb, gamma, eeq, dE, dE_J: dE * scale, Win, eta, gate,
-    score: Win > 1e-9 ? eta * (dE / Win) * gate : 0,
+    etaP, prod_J: dE * scale * etaP,           // productive snap energy, J
+    score: Win > 1e-9 ? eta * (dEp / Win) * gate : 0,
     thetaPeak, thetaStable, alphaSnap,
     stored_J: 0.5 * (thetaPeak - alphaSnap) ** 2 * scale,
     N: fatigueLife(eeq),
@@ -649,170 +889,22 @@ function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech) {
   };
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   4b · HYSTERESIS — branch-following continuation
-   The equilibrium condition g(θ) = θ − α + λ sin θ = 0 is multivalued past
-   the fold, so the tube's tip angle is not a function of the motor angle: it
-   depends on which branch the system is ON, i.e. where it has been. Sweeping
-   α up and back down therefore snaps at two DIFFERENT angles, tracing a
-   hysteresis loop. Solving for a root at each α independently would miss this
-   entirely — the branch has to be carried forward.
-   ═══════════════════════════════════════════════════════════════ */
-
-/** All equilibria at a given motor angle. */
-function equilibria(lambda, a) {
-  const g = (t) => t - a + lambda * Math.sin(t);
-  const lo = a - lambda - Math.PI, hi = a + lambda + Math.PI;
-  const N = 600, out = [];
-  let pt = lo, pg = g(lo);
-  for (let i = 1; i <= N; i++) {
-    const t = lo + ((hi - lo) * i) / N, gt = g(t);
-    if (pg === 0 || pg * gt < 0) {
-      let x0 = pt, x1 = t;
-      for (let k = 0; k < 60; k++) {
-        const m = (x0 + x1) / 2;
-        if (g(x0) * g(m) <= 0) x1 = m; else x0 = m;
-      }
-      out.push((x0 + x1) / 2);
-    }
-    pt = t; pg = gt;
-  }
-  return out;
-}
-
-/** Newton continuation of the CURRENT branch. Returns null when the branch
- *  has folded away (V″ ≤ 0, singular Jacobian, or a jump to another root),
- *  which is precisely the snap condition. */
-function branchStep(lambda, a, th) {
-  let x = th;
-  for (let k = 0; k < 60; k++) {
-    const d = 1 + lambda * Math.cos(x);
-    if (Math.abs(d) < 1e-7) return null;
-    const step = (x - a + lambda * Math.sin(x)) / d;
-    x -= step;
-    if (Math.abs(step) < 1e-13) break;
-  }
-  if (!Number.isFinite(x)) return null;
-  if (1 + lambda * Math.cos(x) <= 0) return null;
-  if (Math.abs(x - th) > Math.PI / 2) return null;
-  return x;
-}
-
-/** One direction of the sweep. */
-function sweepBranch(lambda, from, to, N) {
-  const pts = [], snaps = [];
-  // Seed on an actual equilibrium. θ = α is NOT a solution once λ > 0, so
-  // starting there made the first Newton correction look like a snap.
-  const seed = equilibria(lambda, from).filter((r) => stiffness(r, lambda) > 0);
-  let th = seed.length
-    ? seed.reduce((p, c) => (Math.abs(c - from) < Math.abs(p - from) ? c : p))
-    : from;
-  for (let i = 0; i <= N; i++) {
-    const a = from + ((to - from) * i) / N;
-    const next = branchStep(lambda, a, th);
-    if (next !== null) { pts.push({ a, th: next, snap: false }); th = next; continue; }
-
-    // The branch is gone. Fall to the lowest-energy stable equilibrium that is
-    // not the one we just left.
-    const roots = equilibria(lambda, a).filter((r) => stiffness(r, lambda) > 0);
-    if (!roots.length) { pts.push({ a, th, snap: false }); continue; }
-    let best = null, bestE = Infinity;
-    for (const r of roots) {
-      if (Math.abs(r - th) < 0.25) continue;
-      const e = energy(r, a, lambda);
-      if (e < bestE) { bestE = e; best = r; }
-    }
-    if (best === null) best = roots.reduce((p, c) => (energy(c, a, lambda) < energy(p, a, lambda) ? c : p));
-    snaps.push({ a, from: th, to: best, released: energy(th, a, lambda) - energy(best, a, lambda) });
-    pts.push({ a, th: best, snap: true });
-    th = best;
-  }
-  return { pts, snaps };
-}
-
-function hysteresisLoop(lambda, revs = 1, N = 700) {
-  const A = revs * 2 * Math.PI;
-  return { up: sweepBranch(lambda, -A, A, N), down: sweepBranch(lambda, A, -A, N) };
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   4c · MOTOR + HYDRODYNAMICS
-   ═══════════════════════════════════════════════════════════════ */
-
-/** DC motor speed–torque line: linear from stall torque to no-load speed. */
-const torqueAvail = (rpm, rpmNoLoad, stall_Nmm) =>
-  Math.max(0, (stall_Nmm / 1000) * (1 - rpm / rpmNoLoad));
-
-/**
- * Everything downstream of a snap: the energy it releases, whether the motor
- * can actually drive the wind-up, and what that buys in the water.
- *
- * Cruise speed balances average thrust power against quadratic body drag,
- * P = ½ρ C_d A v³. It ignores friction, superelastic hysteresis loss, and
- * added-mass effects, so it is an optimistic upper bound — not a prediction.
- */
-function propulsion(lambda, Lc, motor, hydro, mech) {
-  const scale = mech.kScale / Lc;                 // N·m per unit of V(θ)
-  const REVS = 1;
-  const loop = hysteresisLoop(lambda, REVS, 520);
-  const snaps = [...loop.up.snaps, ...loop.down.snaps];
-  // The up sweep runs α from −2π·REVS to +2π·REVS, i.e. 2·REVS revolutions —
-  // NOT one. Counting its raw length as a per-revolution rate double-counted
-  // and inflated thrust power. Count over the LAST full revolution only, so
-  // the rate is per-revolution and any start transient is excluded.
-  const aLast = 2 * Math.PI * REVS - 2 * Math.PI;
-  const snapsPerRev = loop.up.snaps.filter((sn) => sn.a >= aLast).length;
-
-  if (!snaps.length) {
-    return { snapCapable: false, loop, snapsPerRev: 0 };
-  }
-  const biggest = snaps.reduce((p, c) => (Math.abs(c.to - c.from) > Math.abs(p.to - p.from) ? c : p));
-  const released = Math.max(biggest.released, 0) * scale;      // J
-  const dTip = Math.abs(biggest.to - biggest.from);            // rad
-  const motorPerRev = motorWork(lambda) * scale;               // J per revolution
-
-  // Reaction torque on the motor is ∂V/∂α = −(θ−α); take the peak over the
-  // smooth stretches, excluding the snap discontinuities themselves.
-  let peakTorque = 0;
-  for (const p of loop.up.pts) {
-    if (p.snap) continue;
-    peakTorque = Math.max(peakTorque, Math.abs(p.th - p.a) * scale);
-  }
-  const avail = torqueAvail(motor.rpm, motor.rpmNoLoad, motor.stall);
-
-  const Afin = (hydro.finW / 1000) * Lc;                       // m²
-  const sSwept = Math.max(dTip * Lc, 1e-6);                    // m
-  const vJet = Math.sqrt((2 * released) / (hydro.rho * hydro.Cd * Afin * sSwept));
-
-  const cycle = 60 / motor.rpm;                                // s per revolution
-  const Pthrust = (hydro.nFins * released * snapsPerRev) / cycle;
-  const areaM2 = hydro.area / 1e4;
-  const vCruise = Math.cbrt((2 * Pthrust) / (hydro.rho * hydro.bodyCd * areaM2));
-
-  return {
-    snapCapable: true, loop, snaps, snapsPerRev, released, dTip,
-    motorPerRev, peakTorque, avail,
-    torqueMargin: peakTorque > 0 ? avail / peakTorque : Infinity,
-    energyMargin: released > 0 ? motorPerRev / released : Infinity,
-    vJet, Pthrust, vCruise,
-  };
-}
-
-function buildGrid({ nx, ny, kappaMax, LcMin, LcMax, strainLimit, etaK, mech }) {
+function buildGrid({ nx, ny, kappaMin = 0, kappaMax, LcMin, LcMax, strainLimit, etaK, mech, Lext }) {
   const cells = [];
-  let best = null, maxDE = 0, maxMJ = 0, maxScore = 0;
+  let best = null, maxDE = 0, maxMJ = 0, maxProd = 0, maxScore = 0;
   for (let j = 0; j < ny; j++) {
     const Lc = LcMin + ((LcMax - LcMin) * j) / (ny - 1);
     for (let i = 0; i < nx; i++) {
-      const d = evaluateDesign((kappaMax * i) / (nx - 1), Lc, strainLimit, etaK, mech);
+      const d = evaluateDesign(kappaMin + ((kappaMax - kappaMin) * i) / (nx - 1), Lc, strainLimit, etaK, mech, Lext);
       cells.push(d);
       if (d.dE > maxDE) maxDE = d.dE;
       if (d.dE_J > maxMJ) maxMJ = d.dE_J;
+      if (d.prod_J > maxProd) maxProd = d.prod_J;
       if (d.score > maxScore) { maxScore = d.score; best = d; }
     }
   }
-  // maxMJ is in JOULES here; the surface converts to mJ at the point of use.
-  return { cells, nx, ny, kappaMax, LcMin, LcMax, maxDE, maxMJ, maxScore, best };
+  // maxMJ / maxProd are in JOULES here; the surface converts to mJ at use.
+  return { cells, nx, ny, kappaMin, kappaMax, LcMin, LcMax, maxDE, maxMJ, maxProd, maxScore, best };
 }
 
 /* ── Math typesetting ─────────────────────────────────────────────────────
@@ -1014,11 +1106,9 @@ const useDesign = () => useContext(DesignCtx);
 
 /* Every CONFIGURED quantity in the app lives here, in one store, because the
    workflow is "set the specification once, then read it from several views".
-   Splitting motor and hydrodynamic parameters into the propulsion tab's local
-   state (as they were) meant the same physical robot had different definitions
-   depending on which tab you were looking at, and a theme change silently
-   reset them -- the workspaces are remounted on theme to repaint their
-   canvases, and local state does not survive a remount.
+   Keeping any of it in one tab's local state would let two tabs disagree
+   about the same physical robot, and would lose it whenever that tab
+   unmounts.
 
    What is NOT here: alpha, the motor base twist. That is not a specification,
    it is the live actuation input the simulator drives, so it stays with the
@@ -1028,10 +1118,14 @@ function useDesignStore() {
   // used to hard-code, but now as a consequence of the geometry rather than a
   // free parameter.
   const [sim, setSim] = useState({ alphaDeg: 0, LcMm: 150, extMm: 45, k1: 9.4, k2: 9.4 });
-  const [motor, setMotor] = useState({ rpmNoLoad: 100, rpm: 70, stall: 150 });
-  const [hydro, setHydro] = useState({ finW: 8, Cd: 1.3, rho: 997, nFins: 2, area: 20, bodyCd: 0.8 });
-  // Sweep domain for the optimiser: the box it searches, not the design itself.
-  const [domain, setDomain] = useState({ logLife: 10, LcMaxMm: 150, LcLimitMm: 150, etaK: 0.05, clip: true });
+  // Optimiser settings: the fatigue/score constants and the graph's axis
+  // bounds (the box it searches), not the design itself. Bounds are typed,
+  // so there is no separate slider ceiling to keep in step. z is in mJ;
+  // zAuto spans 0 to the tallest cell.
+  const [domain, setDomain] = useState({
+    logLife: 10, etaK: 0.05, clip: true,
+    kMin: 0, kMax: 25, LcMinMm: 10, LcMaxMm: 150, zAuto: true, zMin: 0, zMax: 300,
+  });
   // Data-layer visibility on the 3-D view. This belongs in the shared store,
   // not local state on SimulatorWorkspace: the root remounts every workspace
   // on a theme switch (key={`${tab}${ready}`}, so the canvases and WebGL
@@ -1049,20 +1143,17 @@ function useDesignStore() {
   const patchSim = useCallback((p) => setSim((s) => ({ ...s, ...p })), []);
   const patchTube = useCallback((which, p) =>
     setTubes((t) => ({ ...t, [which]: { ...t[which], ...p } })), []);
-  const patchMotor = useCallback((p) => setMotor((s) => ({ ...s, ...p })), []);
-  const patchHydro = useCallback((p) => setHydro((s) => ({ ...s, ...p })), []);
   const patchDomain = useCallback((p) => setDomain((s) => ({ ...s, ...p })), []);
   const patchLayers = useCallback((p) => setLayers((s) => ({ ...s, ...p })), []);
 
   const applyDesign = useCallback((d) => {
     // The sweep is the equal-precurvature diagonal, so a design lands in the
     // simulator as κ₁ = κ₂ = κ; λ then follows from those and L_c.
-    const k = Math.min(25, d.kappa);
-    setSim((s) => ({ ...s, LcMm: d.Lc * 1000, k1: k, k2: k, alphaDeg: 0 }));
+    setSim((s) => ({ ...s, LcMm: d.Lc * 1000, k1: d.kappa, k2: d.kappa, alphaDeg: 0 }));
     setHandoff({ kappa: d.kappa, Lc: d.Lc, lambda: d.lambda, stamp: Date.now() });
   }, []);
 
-  return { sim, patchSim, motor, patchMotor, hydro, patchHydro,
+  return { sim, patchSim,
     domain, patchDomain, layers, patchLayers, handoff, applyDesign,
     tubes, patchTube, setTubes, outerLocked, setOuterLocked, mech };
 }
@@ -1086,12 +1177,26 @@ function Slider({ label, symbol, value, min, max, step, onChange, unit, accent, 
   );
 }
 
-function Metric({ icon, label, value, color, note }) {
+/** A calculated number that knows where it came from. Clicking it offers a
+ *  jump to its entry on the citations page; the value shown is passed along
+ *  so the entry can say which number brought the reader there. */
+function Cx({ id, children }) {
+  const { openCite } = useDesign();
+  const open = (e) => { e.stopPropagation(); openCite(id, e.currentTarget.textContent.trim(), e); };
+  return (
+    <span className="ctr-cx" role="button" tabIndex={0} title="Where does this number come from?"
+      onClick={open} onKeyDown={(e) => { if (e.key === 'Enter') open(e); }}>
+      {children}
+    </span>
+  );
+}
+
+function Metric({ icon, label, value, color, note, cite }) {
   return (
     <div className="ctr-metric">
       <div className="k">{icon}<M>{label}</M></div>
       <div className="v mono">
-        {value}
+        {cite ? <Cx id={cite}>{value}</Cx> : value}
         {note && (
           <span className="ctr-state">
             <i style={{ background: color }} />{note}
@@ -1102,14 +1207,14 @@ function Metric({ icon, label, value, color, note }) {
   );
 }
 
-function ZoneGauge({ label, value, display, bands, max }) {
+function ZoneGauge({ label, value, display, bands, max, cite }) {
   const pct = Math.max(0, Math.min(1, value / max)) * 100;
   const zone = bands.find((b) => value <= b.upto) || bands[bands.length - 1];
   return (
     <div className="ctr-gauge">
       <div className="top">
         <span><M>{label}</M></span>
-        <span className="mono t12" style={{ color: zone.color }}>{display}</span>
+        <span className="mono t12" style={{ color: zone.color }}>{cite ? <Cx id={cite}>{display}</Cx> : display}</span>
       </div>
       <div className="track">
         {bands.map((b, i) => {
@@ -1207,6 +1312,18 @@ function NumField({ value, onCommit, min, max, step = 0.01, digits = 3, title })
   );
 }
 
+/** One typed specification value: label, field, unit. */
+function FieldRow({ label, sym, unit, value, onCommit, min, max, digits = 2, step }) {
+  return (
+    <label className="ctr-field">
+      <span className="l"><M>{label}</M><i><M>{sym}</M></i></span>
+      <NumField value={value} onCommit={onCommit} min={min} max={max} digits={digits}
+        step={step} title={`${label} (${unit}), ${min} to ${max}`} />
+      <span className="u">{unit}</span>
+    </label>
+  );
+}
+
 /** Keeps a set of panel open/closed flags. */
 function usePanels(initial) {
   const [open, setOpen] = useState(initial);
@@ -1239,6 +1356,7 @@ function SimulatorWorkspace() {
      see which one your design actually cares about. */
   const setLayer = useCallback((k, v) => patchLayers({ [k]: v }), [patchLayers]);
   const [layersOpen, setLayersOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [side, setSide] = useState(true);
   const [panels, togglePanel] = usePanels({ energy: true, scurve: true });
   const [hud, setHud] = useState({ theta: 0, alpha: 0, kres: 0, V: 0, Vpp: 1, vel: 0, snapping: false });
@@ -1252,7 +1370,7 @@ function SimulatorWorkspace() {
   }, [alphaDeg, lambda, k1, k2, LcMm, extMm, sweeping, slow, layers, mech]);
 
   const theta = useRef(0), vel = useRef(0), flash = useRef(0), subAccum = useRef(0);
-  const snapEv = useRef(null), lastTip = useRef(null);   // in-flight snap, for the compass
+  const snapEv = useRef(null);                            // in-flight snap, for the compass
   const trail = useRef([]), sweepAlpha = useRef(0);
   const mountRef = useRef(null), energyRef = useRef(null), scurveRef = useRef(null);
   const three = useRef({});
@@ -1586,13 +1704,19 @@ function SimulatorWorkspace() {
     const tracks = { tip: makeTrack(1.9), mid: makeTrack(1.0) };
 
     /* ── Snap compass ──────────────────────────────────────────────────
-       Every snap is recorded as a vector: direction = the fin tip's
-       displacement over the release, projected on the floor; magnitude = the
-       elastic energy that release gave up, dV*(k_t/L_c), the same E_snap the
-       optimiser plots. The bold arrow is their sum. Alignment = |sum| / sum
-       of magnitudes: 1 means every snap pushed the same way, less means
-       energy went sideways. This is what "is the thrust all going forward"
-       looks like as a number.
+       Every snap is recorded as a vector: direction = where the snap's arc
+       pushes, i.e. the energy-weighted mean of the tip's floor directions
+       over the release (Σ ΔE_k·d̂_k -- NOT the start-to-end chord, which
+       on a hooked arc can point nearly backwards); magnitude = the elastic
+       energy that release gave up, dV*(k_t/L_c), the same E_snap the
+       optimiser plots. The bold arrow is their sum.
+
+       Every piece of every recorded arc is kept too, so the snap propulsion
+       efficiency η = (F − B)/(F + B) can be taken against the CURRENT net
+       direction -- see snapEfficiency() for the definition. It is the same
+       number the optimiser computes from the model, measured here from the
+       snaps that actually happened, including any the user drove backwards
+       by hand.
 
        Direction convention follows the request: the arrow points the way the
        FIN moves. The reaction on the body is the reverse.
@@ -1601,8 +1725,9 @@ function SimulatorWorkspace() {
        reason: a 1 px line is not legible from the plan view this exists to
        serve. They fade edge-on with the tracks, being floor figures too. */
     const snaps = [];                          // [{dx, dz, E}]  E in J
+    const pieces = [];                         // every arc piece {u, v, e}, floor (x, z)
     const net = new THREE.Vector2(0, 0);
-    let sumE = 0;
+    let sumE = 0, share = { F: 0, B: 0, E: 0, eta: 0 };
     const compassGroup = new THREE.Group();
     compassGroup.visible = false;
     scene.add(compassGroup);
@@ -1647,15 +1772,26 @@ function SimulatorWorkspace() {
       setGeo(eachMesh, each); setGeo(netMesh, sum);
     };
     const compass = {
+      /** q = {pts: [[x, z, V], ...] floor path of the arc, E: energy in J}. */
       add(q) {
-        snaps.push(q);
-        // Unit direction times energy: the displacement's LENGTH carries no
-        // information here, only its bearing does.
-        const L = Math.hypot(q.dx, q.dz);
-        net.x += (q.dx / L) * q.E; net.y += (q.dz / L) * q.E; sumE += q.E;
+        const pc = strokePieces(q.pts);
+        const [dx, dz] = strokeVector(pc);
+        const L = Math.hypot(dx, dz);
+        if (L < 1e-12) return;
+        snaps.push({ dx, dz, E: q.E });
+        pieces.push(...pc);
+        // Unit direction times energy: only the bearing of Σ ΔE·d̂ is used,
+        // so each snap still counts once, at its full E_snap.
+        net.x += (dx / L) * q.E; net.y += (dz / L) * q.E; sumE += q.E;
+        const n = net.length();
+        share = n > 1e-12 ? forwardShare(pieces, net.x / n, net.y / n) : { F: 0, B: 0, E: 0, eta: 0 };
         rebuildCompass();
       },
-      clear() { snaps.length = 0; net.set(0, 0); sumE = 0; rebuildCompass(); },
+      clear() {
+        snaps.length = 0; pieces.length = 0; net.set(0, 0); sumE = 0;
+        share = { F: 0, B: 0, E: 0, eta: 0 };
+        rebuildCompass();
+      },
       setVisible(v) { compassGroup.visible = v; },
       setFade(kf) { eachMesh.material.opacity = 0.55 * kf; netMesh.material.opacity = 0.95 * kf; },
       restyle() {
@@ -1664,6 +1800,7 @@ function SimulatorWorkspace() {
       },
       /** For the HUD: |net| in J, alignment |net|/sumE, count, bearing (deg, 0 = +X, CCW toward -Z... i.e. atan2(-z, x)). */
       stats: () => ({ mag: net.length(), align: sumE > 0 ? net.length() / sumE : 0, n: snaps.length,
+        eta: share.eta, F: share.F, B: share.B, E: share.E,
         bearing: net.length() > 1e-9 ? (Math.atan2(-net.y, net.x) * 180) / Math.PI : null }),
       /** Unit heading of the net vector on the floor, or null. */
       heading: () => (net.length() > 1e-9 ? net.clone().normalize() : null),
@@ -2370,6 +2507,8 @@ function SimulatorWorkspace() {
           // snap can physically exist. Shift both and the state is preserved.
           sweepAlpha.current -= Math.PI * 4;
           theta.current -= Math.PI * 4;
+          // A snap in flight moves with the state it belongs to.
+          if (snapEv.current) { snapEv.current.th -= Math.PI * 4; snapEv.current.a -= Math.PI * 4; }
           trail.current = [];
           wrapped = true;
         }
@@ -2397,16 +2536,17 @@ function SimulatorWorkspace() {
       if (!wrapped && p.lambda > LAMBDA_CRIT && rate > SNAP_THRESHOLD) flash.current = 0.45;
       flash.current = Math.max(0, flash.current - dt);
       const snapping = flash.current > 0;
-      /* Snap bookkeeping for the compass. A snap runs from the frame the
-         rate first crosses the threshold to the frame the flash timer
-         expires; its energy is the drop in V between those two states, its
-         direction the tip's floor displacement between them. The flash
-         timer holds 0.45 s past the last fast frame, so a little
-         quasi-static creep rides along at the end -- small, and consistent
-         with what the rest of the app already calls "the snap". */
-      if (snapping && !snapEv.current) {
-        snapEv.current = { th: before, pos: lastTip.current ? lastTip.current.clone() : null };
-      }
+      /* Snap bookkeeping for the compass. A snap is detected on the frame
+         the rate first crosses the threshold, and recorded when the flash
+         timer expires. What is recorded is the snap's quasi-static arc at
+         the motor angle it LEFT from: θ runs downhill from where it was to
+         the minimum it falls into, at that fixed α. The dynamics overshoot
+         and ring about that minimum, but the tip shape is a function of
+         (α, θ) alone, so the ringing retraces the same arc and adds nothing
+         but noise; and the motor creep during the flash hold is wind-up for
+         the NEXT snap, not part of this one. This is exactly the path the
+         optimiser evaluates, so the two efficiencies agree. */
+      if (snapping && !snapEv.current) snapEv.current = { th: before, a };
 
       trail.current.push([theta.current, energy(theta.current, a, p.lambda)]);
       if (trail.current.length > 26) trail.current.shift();
@@ -2428,19 +2568,22 @@ function SimulatorWorkspace() {
         const tip = pts[pts.length - 1];
         const mid = pts[nOverlap];
         const tipW = T.robot.localToWorld(tip.clone());
-        if (snapEv.current && !snapEv.current.pos) snapEv.current.pos = tipW.clone();
         if (!snapping && snapEv.current) {
           const ev = snapEv.current; snapEv.current = null;
-          if (ev.pos && p.lambda > LAMBDA_CRIT) {
-            const dE = energy(ev.th, a, p.lambda) - energy(theta.current, a, p.lambda);
-            const dx = tipW.x - ev.pos.x, dz = tipW.z - ev.pos.z;
+          const land = ev && p.lambda > LAMBDA_CRIT ? settle(ev.th, ev.a, p.lambda) : null;
+          if (land !== null && Math.abs(land - ev.th) > 0.3) {
+            const dE = energy(ev.th, ev.a, p.lambda) - energy(land, ev.a, p.lambda);
+            const tmp = [0, 0, 0], w = new THREE.Vector3();
+            const pts = snapStroke((th) => {
+              tipPoint(ev.a, th, p.k1, p.k2, p.Lc, p.Lext, p.w1, p.w2, tmp);
+              T.robot.localToWorld(w.set(tmp[0], tmp[1], tmp[2]));
+              return [w.x, w.z, energy(th, ev.a, p.lambda)];
+            }, ev.th, land);
+            const span = Math.hypot(pts[pts.length - 1][0] - pts[0][0], pts[pts.length - 1][1] - pts[0][1]);
             // Physical scaling as in the optimiser: E_snap = dV * k_t / L_c.
-            if (dE > 1e-6 && Math.hypot(dx, dz) > 0.5) {
-              T.compass?.add({ dx, dz, E: dE * p.kScale / p.Lc });
-            }
+            if (dE > 1e-6 && span > 0.5) T.compass?.add({ pts, E: dE * p.kScale / p.Lc });
           }
         }
-        lastTip.current = tipW;
         if (T.tracks) {
           // pts live in the robot group's local frame (pitched -90 deg and
           // lifted onto the base plate), so a sample has to pass through that
@@ -2495,6 +2638,12 @@ function SimulatorWorkspace() {
   }, [patchSim]);
 
   const unstable = hud.Vpp <= 0;
+  // What the model predicts for this exact design (the optimiser's number),
+  // shown until snaps have been measured and kept alongside them after.
+  const modelEff = useMemo(() => snapEfficiency(lambda, k1, k2, LcMm / 1000, extMm / 1000, mech),
+    [lambda, k1, k2, LcMm, extMm, mech]);
+  const measured = hud.compass && hud.compass.n > 0 ? hud.compass : null;
+  const effShown = measured ?? modelEff;
   const nLayers = Object.values(layers).filter(Boolean).length;
   const anyTrack = layers.tipTrack || layers.midTrack;
 
@@ -2502,13 +2651,54 @@ function SimulatorWorkspace() {
     <div className="col grow">
       <div className="ctr-body">
         <div className="ctr-view" ref={mountRef}>
-          <div className="ctr-overlay mono dim" style={{ top: 12, left: 12 }}>
-            <div>drag · orbit</div><div>shift + drag · pan</div><div>scroll · zoom</div>
-            <div>view cube · click a face, edge or corner</div>
-            <div>space · {cubeOn ? 'hide' : 'show'} view cube</div>
-            {topView && <div style={{ color: C.accent }}>plan view · click a cube face to leave</div>}
-            {anyTrack && !topView && (
-              <div style={{ color: C.accent }}>tracks drawn on floor — view from TOP</div>
+          <div className="ctr-tl">
+            {/* Snap propulsion efficiency: η = (F − B)/E, the net push of the
+                snap arc along the net snap direction over its whole energy. */}
+            <div className="ctr-eff" title={"Share of the snap's energy that ends up pushing along the net snap direction. "
+              + 'Backward motion cancels forward; sideways motion counts as lost. Pieces of the arc are weighted '
+              + 'by the energy they release. η = (forward − back) / total; a straight snap along the net scores 100%.'}>
+              <div className="cap-label">Snap propulsion efficiency</div>
+              {effShown ? (
+                <>
+                  <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
+                    <Cx id="eta"><span className="v">{(effShown.eta * 100).toFixed(0)}%</span></Cx>
+                    <span className="ft">{measured ? `measured · ${measured.n} snap${measured.n === 1 ? '' : 's'}` : 'model · sweep α to measure'}</span>
+                  </div>
+                  <div className="bar">
+                    <i style={{ width: `${Math.max(0, effShown.eta) * 100}%`, background: C.gold }} />
+                    {measured && modelEff && <b style={{ left: `calc(${Math.max(0, modelEff.eta) * 100}% - 1px)` }} title="model" />}
+                  </div>
+                  <div className="ft">
+                    {effShown.E > 0 ? (
+                      <Cx id="split">
+                        fwd {((100 * effShown.F) / effShown.E).toFixed(0)}%
+                        {' · '}back {((100 * effShown.B) / effShown.E).toFixed(0)}%
+                        {' · '}side {(100 * Math.max(0, 1 - (effShown.F + effShown.B) / effShown.E)).toFixed(0)}%
+                      </Cx>
+                    ) : 'no forward push'}
+                    {measured && modelEff && <> · <Cx id="eta">model {(modelEff.eta * 100).toFixed(0)}%</Cx></>}
+                  </div>
+                </>
+              ) : (
+                <div className="ft" style={{ marginTop: 4 }}>no snap — λ {lambda.toFixed(2)} ≤ π²/4</div>
+              )}
+            </div>
+
+            <button className={`ctr-help-btn${helpOpen ? ' on' : ''}`} onClick={() => setHelpOpen((v) => !v)}
+              aria-expanded={helpOpen}>
+              <Keyboard size={12} /> controls
+              {topView && <span style={{ color: C.accent }}>· plan view</span>}
+            </button>
+            {helpOpen && (
+              <div className="ctr-help">
+                <div>drag · orbit</div><div>shift + drag · pan</div><div>scroll · zoom</div>
+                <div>view cube · click a face, edge or corner</div>
+                <div>space · {cubeOn ? 'hide' : 'show'} view cube</div>
+                {topView && <div style={{ color: C.accent }}>plan view · click a cube face to leave</div>}
+                {anyTrack && !topView && (
+                  <div style={{ color: C.accent }}>tracks drawn on floor — view from TOP</div>
+                )}
+              </div>
             )}
           </div>
 
@@ -2545,7 +2735,7 @@ function SimulatorWorkspace() {
                 <div style={{ color: C.dim }}>— single snaps</div>
                 {hud.compass && hud.compass.n > 0 ? (
                   <div style={{ color: C.gold }}>
-                    Σ {(hud.compass.mag * 1000).toFixed(1)} mJ · align {hud.compass.align.toFixed(2)}
+                    <Cx id="net">Σ {(hud.compass.mag * 1000).toFixed(1)} mJ</Cx> · <Cx id="eta">η {(hud.compass.eta * 100).toFixed(0)}%</Cx>
                     {' · '}n {hud.compass.n}
                     {hud.compass.bearing !== null && ` · ${hud.compass.bearing.toFixed(0)}°`}
                   </div>
@@ -2590,7 +2780,7 @@ function SimulatorWorkspace() {
                 <div className="ctr-lyr-grid">
                   <LayerRow on={layers.compass} onChange={(v) => setLayer('compass', v)}
                     icon={Zap} color={C.gold} name="Net snap"
-                    desc="Each snap as a vector (direction of the tip's release, length = energy). Bold arrow = their sum; 'align' = |Σ| / ΣE." />
+                    desc="Each snap as a vector (the direction its arc pushes, length = energy). Bold arrow = their sum; η = propulsion efficiency along it." />
                   <LayerRow on={layers.headingUp} onChange={(v) => setLayer('headingUp', v)}
                     disabled={!layers.compass} icon={Compass} color={C.accent} name="Snap → right"
                     desc="Turn the top-down view so the net snap points screen-right. Off = north-up. Needs Net snap." />
@@ -2660,19 +2850,19 @@ function SimulatorWorkspace() {
         </div>
 
         <div className="ctr-metrics">
-          <Metric icon={<Boxes size={12} />} label="Bifurcation λ [–]" value={lambda.toFixed(2)}
+          <Metric icon={<Boxes size={12} />} label="Bifurcation λ [–]" value={lambda.toFixed(2)} cite="lambda"
             color={lambda > LAMBDA_CRIT ? C.gold : C.dim}
             note={lambda > LAMBDA_CRIT ? "snaps" : "no fold"} />
-          <Metric icon={<Zap size={12} />} label="Elastic V [–]" value={hud.V.toFixed(2)} color={C.gold} />
-          <Metric icon={<Gauge size={12} />} label="Lumped V″ [–]" value={hud.Vpp.toFixed(2)}
+          <Metric icon={<Zap size={12} />} label="Elastic V [–]" value={hud.V.toFixed(2)} color={C.gold} cite="V" />
+          <Metric icon={<Gauge size={12} />} label="Lumped V″ [–]" value={hud.Vpp.toFixed(2)} cite="Vpp"
             color={unstable ? C.red : C.green} note={unstable ? 'unstable' : 'stable'} />
           <Metric icon={<Activity size={12} />} label="Twist rate [°/s]"
-            value={`${((hud.vel * 180) / Math.PI).toFixed(0)}°/s`} color={hud.snapping ? C.red : C.dim} />
-          <Metric icon={<Waves size={12} />} label="Resultant |K| [m⁻¹]" value={hud.kres.toFixed(2)}
+            value={`${((hud.vel * 180) / Math.PI).toFixed(0)}°/s`} color={hud.snapping ? C.red : C.dim} cite="integ" />
+          <Metric icon={<Waves size={12} />} label="Resultant |K| [m⁻¹]" value={hud.kres.toFixed(2)} cite="curv"
             color={hud.kres < 0.5 ? C.unstable : C.green}
             note={hud.kres < 0.5 ? "straight" : ""} />
           <Metric icon={<Activity size={12} />} label="Tip twist θ [°]"
-            value={`${((hud.theta * 180) / Math.PI).toFixed(0)}°`} color={C.cyan} />
+            value={`${((hud.theta * 180) / Math.PI).toFixed(0)}°`} color={C.cyan} cite="integ" />
         </div>
       </footer>
     </div>
@@ -2683,30 +2873,35 @@ function SimulatorWorkspace() {
    8 · WORKSPACE B — DESIGN OPTIMISATION
    ═══════════════════════════════════════════════════════════════ */
 const GRID_N = 50, SURF = 105, HEIGHT = 74;
+/** Surface height (scene units) of a value in mJ inside the z bounds;
+ *  anything outside them is clipped flat to the floor or the ceiling. */
+const zH = (mJ, { zLo, zHi }) => Math.max(0, Math.min(1, (mJ - zLo) / (zHi - zLo))) * HEIGHT;
+/** The colour channel's formula, rendered once. */
+const SCORE_TEX = katex.renderToString(
+  String.raw`\displaystyle \text{Score} = \eta_{\text{hydro}}\,\frac{\eta_{\text{prop}}\,\Delta E}{W_{\text{in}}}\,\exp\!\Big[-\Big(\frac{\varepsilon_{\text{eq}}}{\varepsilon_{\text{allow}}}\Big)^{4}\Big]`,
+  { throwOnError: false });
+const HYDRO_TEX = katex.renderToString(String.raw`\eta_{\text{hydro}} = 1 - e^{-k_\eta\,\eta_{\text{prop}}\,\Delta E}`, { throwOnError: false });
 
 function OptimizerWorkspace() {
   /* This tab owns the whole specification. Every configured quantity in the
      app is edited here and read elsewhere, so there is exactly one definition
      of the robot at any moment. */
-  const { applyDesign, sim, patchSim, motor, patchMotor, hydro, patchHydro,
+  const { applyDesign, sim, patchSim,
     domain, patchDomain, themeTick, tubes, patchTube, setTubes, outerLocked, setOuterLocked,
-    mech } = useDesign();
+    mech, openCite } = useDesign();
   const { LcMm, extMm, k1, k2 } = sim;
   // Part 6: the allowable strain must be justified by a target cycle life,
   // not hardcoded to the 8% monotonic superelastic limit — at 8% the gate is
   // inert over the whole practical κ range and the optimum just walks to the
   // corner of the parameter box.
-  // The 150 mm ceiling was an arbitrary slider bound, not a physical limit —
-  // it is now itself editable.
-  const { logLife, LcMaxMm, LcLimitMm, etaK, clip } = domain;
+  const { logLife, etaK, clip, kMin, kMax, LcMinMm, LcMaxMm, zAuto, zMin, zMax } = domain;
   const setLogLife = (v) => patchDomain({ logLife: v });
-  const setLcMaxMm = (v) => patchDomain({ LcMaxMm: typeof v === 'function' ? v(LcMaxMm) : v });
   const setEtaK = (v) => patchDomain({ etaK: v });
   const setClip = (v) => patchDomain({ clip: v });
   const [hover, setHover] = useState(null);
   const [side, setSide] = useState(true);
   const [panels, togglePanel] = usePanels({
-    sweet: true, design: true, tubes: true, motor: false, water: false, domain: false,
+    sweet: true, design: true, tubes: true, axes: true, scoring: false,
     tradeoff: false, safety: false,
   });
   const designLambda = bifurcation(k1, k2, LcMm / 1000, mech);
@@ -2716,11 +2911,19 @@ function OptimizerWorkspace() {
   const strainPct = strainLimit * 100;
   // ε_bend = κ·d₀/2 ≤ ε_allow on the LARGER of the two tubes, which governs.
   const kappaCeiling = strainLimit / (mech.outerLocked ? mech.t2.r : mech.rMax);
-  const kappaMax = clip ? Math.min(25, kappaCeiling) : 25;
+  // The typed x bound, optionally clipped by that fatigue ceiling.
+  const kappaMax = Math.max(kMin + 0.1, clip ? Math.min(kMax, kappaCeiling) : kMax);
 
   const grid = useMemo(() => buildGrid({
-    nx: GRID_N, ny: GRID_N, kappaMax, LcMin: 0.01, LcMax: LcMaxMm / 1000, strainLimit, etaK, mech,
-  }), [kappaMax, LcMaxMm, strainLimit, etaK, mech]);
+    nx: GRID_N, ny: GRID_N, kappaMin: kMin, kappaMax, LcMin: LcMinMm / 1000, LcMax: LcMaxMm / 1000,
+    strainLimit, etaK, mech, Lext: extMm / 1000,
+  }), [kMin, kappaMax, LcMinMm, LcMaxMm, strainLimit, etaK, mech, extMm]);
+  // z range in mJ: auto runs from 0 to the tallest design; typed bounds clip
+  // the surface flat outside [zLo, zHi]. The hover loop reads it via a ref.
+  const zLo = zAuto ? 0 : zMin;
+  const zHi = zAuto ? Math.max(grid.maxProd * 1000, 1e-9) : Math.max(zMax, zMin + 1e-6);
+  const zRef = useRef({ zLo, zHi });
+  zRef.current = { zLo, zHi };
 
   const best = grid.best;
   const focus = hover || best;
@@ -2867,8 +3070,7 @@ function OptimizerWorkspace() {
           const cell = g.cells[j * g.nx + i];
           if (cell) {
             markHover.visible = true;
-            const eMax = g.maxMJ * 1000;
-            const y = eMax > 0 ? ((cell.dE_J * 1000) / eMax) * HEIGHT : 0;
+            const y = zH(cell.prod_J * 1000, zRef.current);
             markHover.position.set(
               -SURF + (2 * SURF * i) / (g.nx - 1), y + 2,
               -SURF + (2 * SURF * j) / (g.ny - 1)
@@ -2904,7 +3106,7 @@ function OptimizerWorkspace() {
       if (tip && cell && pt) {
         tip.style.display = 'block';
         tip.style.left = `${Math.max(8, Math.min(pt.x + 16, pt.w - 232))}px`;
-        tip.style.top = `${Math.max(8, Math.min(pt.y + 14, pt.h - 196))}px`;
+        tip.style.top = `${Math.max(8, Math.min(pt.y + 14, pt.h - 236))}px`;
       } else if (tip) tip.style.display = 'none';
     };
   }, []);
@@ -2912,14 +3114,16 @@ function OptimizerWorkspace() {
   useEffect(() => {
     const T = three.current;
     if (!T.surface) return;
-    const { cells, nx, ny, maxDE, maxMJ, maxScore, kappaMax, LcMin, LcMax } = grid;
-    // Surface height is the TRUE snap energy in millijoules, not the
-    // nondimensional ΔE. E_snap = ΔE·(k_t/L_c), and k_t/L_c varies ~2.75x over
-    // the snapping part of the L_c axis, so plotting ΔE made equal heights mean
-    // unequal energies and visually understated short overlaps.
-    const EMAX = maxMJ * 1000;                       // mJ
+    const { cells, nx, ny, maxDE, maxScore, kappaMin, kappaMax, LcMin, LcMax } = grid;
+    // Surface height is the PRODUCTIVE snap energy E_snap·η in millijoules:
+    // the energy a snap releases, times the share of its arc that pushes
+    // along the net direction (see snapEfficiency). A big snap whose tip
+    // hooks back on itself no longer outranks a smaller, straight one.
+    // E_snap itself is the true energy in mJ, not the nondimensional ΔE --
+    // E_snap = ΔE·(k_t/L_c), and k_t/L_c varies ~2.75x over the L_c axis.
+    const zr = { zLo, zHi };                         // mJ
 
-    /* ── 4D surface: z = ΔE_snap, colour = Score ──────────────────────────
+    /* ── 4D surface: z = E_snap·η, colour = Score ─────────────────────────
        Two independent scalars share one surface — height carries the snap
        energy, colour carries the efficiency score — which is the 4-column
        x/y/z/colour arrangement gnuplot's pm3d draws.
@@ -2951,7 +3155,7 @@ function OptimizerWorkspace() {
         row(cl(j + 1, ny - 1)), row(cl(j + 2, ny - 1)), fv);
     };
 
-    const fE = (i, j) => cells[j * nx + i].dE_J * 1000;     // mJ
+    const fE = (i, j) => cells[j * nx + i].prod_J * 1000;   // mJ
     const fScore = (i, j) => cells[j * nx + i].score;
     // Regime is categorical, so it is carried as a 0/1 field and hard-cut at
     // 0.5 after filtering. Blending it would smear "material failure" into
@@ -2970,7 +3174,7 @@ function OptimizerWorkspace() {
         const n = b * rx + a;
         const u = (a / (rx - 1)) * (nx - 1), v = (b / (ry - 1)) * (ny - 1);
         pos[n * 3] = -SURF + (2 * SURF * a) / (rx - 1);
-        pos[n * 3 + 1] = EMAX > 0 ? (Math.max(bicubic(fE, u, v), 0) / EMAX) * HEIGHT : 0;
+        pos[n * 3 + 1] = zH(bicubic(fE, u, v), zr);
         pos[n * 3 + 2] = -SURF + (2 * SURF * b) / (ry - 1);
         let rgb;
         if (fEpsField(u, v) > 0) rgb = [0.13, 0.11, 0.11];          // past ε_allow
@@ -2993,7 +3197,7 @@ function OptimizerWorkspace() {
     // The wireframe stays on the 50×50 SAMPLE grid, so it still shows where
     // the physics was actually evaluated rather than the interpolated mesh.
     const wpts = [];
-    const dY = (i, j) => (EMAX > 0 ? ((cells[j * nx + i].dE_J * 1000) / EMAX) * HEIGHT : 0) + 0.3;
+    const dY = (i, j) => zH(cells[j * nx + i].prod_J * 1000, zr) + 0.3;
     const P = (i, j) => new THREE.Vector3(
       -SURF + (2 * SURF * i) / (nx - 1), dY(i, j), -SURF + (2 * SURF * j) / (ny - 1));
     for (let j = 0; j < ny; j += 4) for (let i = 0; i < nx - 1; i++) wpts.push(P(i, j), P(i + 1, j));
@@ -3019,8 +3223,7 @@ function OptimizerWorkspace() {
          overshoots and swallowed the tube, breaking it into dashes.          */
     const CONTOUR_LIFT = 0.9;
     const SUBU = 4;                                  // sub-cell search steps
-    const yAt = (u, v) =>
-      (EMAX > 0 ? (Math.max(bicubic(fE, u, v), 0) / EMAX) * HEIGHT : 0) + CONTOUR_LIFT;
+    const yAt = (u, v) => zH(bicubic(fE, u, v), zr) + CONTOUR_LIFT;
     const xAt = (u) => -SURF + (2 * SURF * u) / (nx - 1);
     const zAt = (v) => -SURF + (2 * SURF * v) / (ny - 1);
 
@@ -3112,7 +3315,7 @@ function OptimizerWorkspace() {
 
     const OUT = SURF + 16;                  // tick text sits just off the plot
     const TICK = C.dim, TITLE = C.ink;
-    const xOf = (kappa) => -SURF + (2 * SURF * kappa) / kappaMax;
+    const xOf = (kappa) => -SURF + (2 * SURF * (kappa - kappaMin)) / (kappaMax - kappaMin);
     const zOf = (LcM) => -SURF + (2 * SURF * (LcM - LcMin)) / (LcMax - LcMin);
 
     // Axis rules along the two near edges (the camera looks from the origin
@@ -3126,8 +3329,14 @@ function OptimizerWorkspace() {
       new THREE.LineBasicMaterial({ color: hexInt(C.dim), transparent: true, opacity: 0.5 })));
 
     // x → precurvature κ
-    for (let k = 0; k <= kappaMax + 1e-9; k += 5) {
-      at(label(k.toFixed(0), 30, TICK), xOf(k), 1, -OUT);
+    // Ticks at a 1-2-5 step, since the bounds are now arbitrary.
+    const niceStep = (span) => {
+      const raw = span / 5, p10 = 10 ** Math.floor(Math.log10(raw));
+      return [1, 2, 5, 10].map((m) => m * p10).find((st) => st >= raw);
+    };
+    const kStep = niceStep(kappaMax - kappaMin);
+    for (let k = Math.ceil(kappaMin / kStep - 1e-9) * kStep; k <= kappaMax + 1e-9; k += kStep) {
+      at(label(k.toFixed(kStep < 1 ? 1 : 0), 30, TICK), xOf(k), 1, -OUT);
     }
     at(label('κ  precurvature  (m⁻¹)', 34, TITLE), 0, 1, -OUT - 12);
 
@@ -3139,21 +3348,20 @@ function OptimizerWorkspace() {
     }
     at(label('L_c  overlap  (mm)', 34, TITLE), -OUT - 14, 1, 0);
 
-    // y → snap energy. This is the dimensionless ΔE of V(θ); the tooltip
-    // reports the same design in mJ, which needs L_c to convert.
+    // y → productive snap energy E_snap·η, mJ.
     const eTicks = 4;
     for (let i = 0; i <= eTicks; i++) {
-      const v = (EMAX * i) / eTicks;
-      at(label(v.toFixed(EMAX < 20 ? 1 : 0), 30, TICK), -OUT + 6, 1 + (HEIGHT * i) / eTicks, -SURF);
+      const v = zr.zLo + ((zr.zHi - zr.zLo) * i) / eTicks;
+      at(label(v.toFixed(zr.zHi - zr.zLo < 20 ? 1 : 0), 30, TICK), -OUT + 6, 1 + (HEIGHT * i) / eTicks, -SURF);
     }
-    at(label('E_snap  (mJ)', 34, TITLE), -OUT + 4, HEIGHT + 20, -SURF);
+    at(label('E_snap·η_prop  (mJ)', 34, TITLE), -OUT + 4, HEIGHT + 20, -SURF);
 
     if (grid.best) {
       const bi = cells.indexOf(grid.best);
       const i = bi % nx, j = Math.floor(bi / nx);
       const x = -SURF + (2 * SURF * i) / (nx - 1);
       const z = -SURF + (2 * SURF * j) / (ny - 1);
-      const y = EMAX > 0 ? ((grid.best.dE_J * 1000) / EMAX) * HEIGHT : 0;
+      const y = zH(grid.best.prod_J * 1000, zr);
       T.markBest.position.set(x, y + 4, z); T.markBest.visible = true;
       T.stem.geometry.dispose();
       T.stem.geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, 0, z), new THREE.Vector3(x, y + 4, z)]);
@@ -3161,7 +3369,7 @@ function OptimizerWorkspace() {
     // themeTick: the surface's vertex colours, the contour tubes and every
     // axis label are built from the palette here, so a theme change has to
     // rerun this the same way a new grid does.
-  }, [grid, strainLimit, themeTick]);
+  }, [grid, strainLimit, themeTick, zLo, zHi]);
 
   const analysis = useMemo(() => {
     const { cells } = grid;
@@ -3173,7 +3381,7 @@ function OptimizerWorkspace() {
       sub: cells.filter((c) => c.dE <= 0).length,
       total: cells.length,
       pinnedLc: best && Math.abs(best.Lc - grid.LcMax) < 1e-6,
-      pinnedK: best && Math.abs(best.kappa - grid.kappaMax) < grid.kappaMax / GRID_N,
+      pinnedK: best && Math.abs(best.kappa - grid.kappaMax) < (grid.kappaMax - grid.kappaMin) / GRID_N,
     };
   }, [grid, best]);
 
@@ -3193,11 +3401,15 @@ function OptimizerWorkspace() {
     <div className="ctr-body">
       <div className="ctr-view" ref={mountRef}>
         <div className="ctr-overlay" style={{ top: 12, left: 12 }}>
-          <div className="t11" style={{ color: C.ink }}>Snap energy surface</div>
-          <div className="mono dim">height E_snap [mJ] · colour Score [–]</div>
-          <div className="mono dim" style={{ marginTop: 8 }}>
-            <div>x → κ · 0 – {grid.kappaMax.toFixed(1)} m⁻¹</div>
-            <div>z → L_c · 10 – {LcMaxMm} mm</div>
+          {/* The colour channel's formula, on the plot it colours. */}
+          <div className="ctr-scorecard" style={{ marginTop: 0 }} onClick={(e) => { e.stopPropagation(); openCite('score', 'Score colour', e); }}
+            title="Where does this come from?">
+            <div className="cap-label" style={{ marginBottom: 2 }}>Colour · Score</div>
+            <div dangerouslySetInnerHTML={{ __html: SCORE_TEX }} />
+            <div style={{ marginTop: 2 }} dangerouslySetInnerHTML={{ __html: HYDRO_TEX }} />
+            <div className="mono t9 dim" style={{ marginTop: 4 }}>
+              k_η = {etaK} · <M>{'ε_allow'}</M> = {strainPct.toFixed(2)}% · colour = Score / max
+            </div>
           </div>
         </div>
 
@@ -3225,6 +3437,8 @@ function OptimizerWorkspace() {
                 </div>
                 <hr />
                 <Row k="Snap energy" v={`${(hover.dE_J * 1000).toFixed(2)} mJ`} c={C.gold} />
+                <Row k="Propulsion eff." v={`${(hover.etaP * 100).toFixed(0)} %`} c={C.gold} />
+                <Row k="Productive" v={`${(hover.prod_J * 1000).toFixed(2)} mJ`} c={C.gold} />
                 <Row k="λ [–]" v={hover.lambda.toFixed(2)} c={hover.lambda > LAMBDA_CRIT ? C.gold : C.dim} />
                 <Row k="Equiv. strain" v={`${(hover.eeq * 100).toFixed(2)} %`} c={hover.eeq > strainLimit ? C.red : C.green} />
                 <Row k="Fatigue life ~" v={`${fmtN(hover.N)} cyc`} c="#94a3b8" />
@@ -3245,13 +3459,16 @@ function OptimizerWorkspace() {
           {best && best.dE > 0 ? (
             <>
               <div className="mono" style={{ color: C.cyan, fontSize: 14, lineHeight: 1.6 }}>
-                κ = {best.kappa.toFixed(2)} m⁻¹<br />
-                L_c = {(best.Lc * 1000).toFixed(0)} mm
+                <Cx id="sweet">κ = {best.kappa.toFixed(2)} m⁻¹</Cx><br />
+                <Cx id="sweet">L_c = {(best.Lc * 1000).toFixed(0)} mm</Cx>
               </div>
               <p className="ctr-p">
-                Releases {(best.dE_J * 1000).toFixed(1)} mJ per snap at {(best.eeq * 100).toFixed(2)}% equivalent
-                strain, against a fatigue allowable of {strainPct.toFixed(2)}%. Predicted life {fmtN(best.N)} cycles
-                at λ = {best.lambda.toFixed(2)}.
+                Releases <Cx id="scale">{(best.dE_J * 1000).toFixed(1)} mJ</Cx> per snap,{' '}
+                <Cx id="eta">{(best.etaP * 100).toFixed(0)}%</Cx> of it pushing forward
+                (<Cx id="prod">{(best.prod_J * 1000).toFixed(1)} mJ</Cx> productive), at{' '}
+                <Cx id="eeq">{(best.eeq * 100).toFixed(2)}%</Cx> equivalent strain, against a fatigue
+                allowable of <Cx id="allow">{strainPct.toFixed(2)}%</Cx>. Predicted life{' '}
+                <Cx id="life">{fmtN(best.N)}</Cx> cycles at λ = <Cx id="lambda">{best.lambda.toFixed(2)}</Cx>.
               </p>
               <button className="ctr-btn primary" onClick={() => applyDesign(best)}>
                 <ArrowUpRight size={14} /> Adopt as current design
@@ -3259,8 +3476,8 @@ function OptimizerWorkspace() {
             </>
           ) : (
             <p className="ctr-p">
-              No design in this domain crosses λ = π²/4, so nothing snaps. Raise the allowable strain
-              or the overlap ceiling to open up a bifurcating region.
+              No design inside the graph axes crosses λ = π²/4, so nothing snaps. Raise the allowable
+              strain or widen the κ and L_c bounds under Graph axes.
             </p>
           )}
           {best && best.dE > 0 && (analysis.pinnedLc || analysis.pinnedK) && (
@@ -3282,22 +3499,21 @@ function OptimizerWorkspace() {
           <p className="ctr-p" style={{ fontSize: 11.5 }}>
             The geometry every other tab renders and evaluates{outerLocked ? ', outer tube fully constrained' : ''}.
             λ = C·L_c²·κ₁κ₂
-            {' = '}<b style={{ color: designLambda > LAMBDA_CRIT ? C.gold : C.dim }}>{designLambda.toFixed(2)}</b>
+            {' = '}<Cx id="lambda"><b style={{ color: designLambda > LAMBDA_CRIT ? C.gold : C.dim }}>{designLambda.toFixed(2)}</b></Cx>
             {designLambda > LAMBDA_CRIT ? ' — past the fold, so it snaps.' : ' — below π²/4, so it cannot snap.'}
           </p>
-          <Slider label="Outer precurvature" symbol="κ₁" value={k1} min={0} max={25} step={0.1}
-            unit=" m⁻¹" accent={C.blue} onChange={(v) => patchSim({ k1: v })} />
-          <Slider label="Inner precurvature" symbol="κ₂" value={k2} min={0} max={25} step={0.1}
-            unit=" m⁻¹" accent={C.gold} onChange={(v) => patchSim({ k2: v })} />
-          {/* Bounded by the Sweep domain's overlap ceiling (LcLimitMm) below,
-              not by the current value alone -- raising that ceiling must
-              widen this slider's range too, or the two controls silently
-              disagree about how long an overlap the app allows. */}
-          <Slider label="Overlap length" symbol="L_c" value={LcMm} min={10}
-            max={Math.max(150, LcLimitMm, Math.ceil(LcMm / 10) * 10)} step={1}
-            unit=" mm" digits={0} accent={C.blue} onChange={(v) => patchSim({ LcMm: v })} />
-          <Slider label="Fin extension" symbol="L_ext" value={extMm} min={0} max={120} step={1}
-            unit=" mm" digits={0} accent={C.accent} onChange={(v) => patchSim({ extMm: v })} />
+          {/* Typed, not slid: any value can be entered, so no slider range
+              (and no separate ceiling for it) constrains the design. */}
+          <div className="ctr-fields">
+            <FieldRow label="Outer precurvature" sym="κ₁" unit="m⁻¹" value={k1} min={0} max={1000}
+              digits={2} step={0.1} onCommit={(v) => patchSim({ k1: v })} />
+            <FieldRow label="Inner precurvature" sym="κ₂" unit="m⁻¹" value={k2} min={0} max={1000}
+              digits={2} step={0.1} onCommit={(v) => patchSim({ k2: v })} />
+            <FieldRow label="Overlap length" sym="L_c" unit="mm" value={LcMm} min={0.1} max={100000}
+              digits={1} step={1} onCommit={(v) => patchSim({ LcMm: v })} />
+            <FieldRow label="Fin extension" sym="L_ext" unit="mm" value={extMm} min={0} max={100000}
+              digits={1} step={1} onCommit={(v) => patchSim({ extMm: v })} />
+          </div>
           <div className="mono t10 dim" style={{ lineHeight: 1.6 }}>
             L_ext is the distal run past the sheath, where the fin carries its own
             κ₂ at full magnitude. It changes the shape and the swept track, but
@@ -3327,11 +3543,11 @@ function OptimizerWorkspace() {
             };
             const lamFree = mech.Cfree * (LcMm / 1000) ** 2 * k1 * k2;
             const lamLock = mech.Clocked * (LcMm / 1000) ** 2 * k1 * k2;
-            const verdict = (lam, act, name) => (
+            const verdict = (lam, act, name, cid) => (
               <div className={act ? 'act' : ''}>
                 <div className="cap-label">{name}</div>
                 <div className="mono t13" style={{ color: lam > LAMBDA_CRIT ? C.gold : C.dim }}>
-                  λ = {lam.toFixed(2)}
+                  <Cx id={cid}>λ = {lam.toFixed(2)}</Cx>
                 </div>
                 <div className="t11" style={{ color: lam > LAMBDA_CRIT ? C.gold : C.dim }}>
                   {lam > LAMBDA_CRIT ? 'snaps' : 'no snap — below π²/4'}
@@ -3347,12 +3563,12 @@ function OptimizerWorkspace() {
                   {row('inner', 'Inner fin · κ₂')}
                 </div>
                 <div className="mono t10" style={{ color: mech.clearance > 0 ? C.dim : C.unstable, lineHeight: 1.6 }}>
-                  Radial fit: outer ID − inner OD = {mech.clearance.toFixed(3)} mm
+                  Radial fit: outer ID − inner OD = <Cx id="fit">{mech.clearance.toFixed(3)} mm</Cx>
                   {mech.clearance > 0 ? '' : ' — the inner tube does not fit inside the outer one.'}
                 </div>
                 <div className="mono t10 dim" style={{ lineHeight: 1.6 }}>
-                  k_b {(mech.t1.kb * 1e3).toFixed(3)} / {(mech.t2.kb * 1e3).toFixed(3)} mN·m² ·
-                  k_t {(mech.t1.kt * 1e3).toFixed(3)} / {(mech.t2.kt * 1e3).toFixed(3)} mN·m² (outer / inner)
+                  k_b <Cx id="stiff">{(mech.t1.kb * 1e3).toFixed(3)} / {(mech.t2.kb * 1e3).toFixed(3)}</Cx> mN·m² ·
+                  k_t <Cx id="stiff">{(mech.t1.kt * 1e3).toFixed(3)} / {(mech.t2.kt * 1e3).toFixed(3)}</Cx> mN·m² (outer / inner)
                 </div>
                 <button className="ctr-link" onClick={() => setTubes(DEFAULT_TUBES)}>
                   Reset to the original pair (1.02 / 0.82 mm, both)
@@ -3374,8 +3590,8 @@ function OptimizerWorkspace() {
                   the fin beyond the sheath moves.
                 </p>
                 <div className="ctr-verdict">
-                  {verdict(lamFree, !outerLocked, 'clamped at base')}
-                  {verdict(lamLock, outerLocked, 'fully constrained')}
+                  {verdict(lamFree, !outerLocked, 'clamped at base', 'lambda')}
+                  {verdict(lamLock, outerLocked, 'fully constrained', 'rigid')}
                 </div>
                 <p className="ctr-p" style={{ fontSize: 11.5 }}>
                   Same λ in both modes, for any diameters: with both tubes Nitinol,
@@ -3390,79 +3606,69 @@ function OptimizerWorkspace() {
           })()}
         </Panel>
 
-        <Panel title="Motor" open={panels.motor} onToggle={() => togglePanel('motor')}
-          icon={<Gauge size={14} color={C.cyan} />}>
-          <Slider label="No-load speed" symbol="ω₀" value={motor.rpmNoLoad} min={10} max={300} step={1}
-            unit=" RPM" digits={0} accent={C.cyan} onChange={(v) => patchMotor({ rpmNoLoad: v })} />
-          <Slider label="Operating speed" symbol="ω" value={motor.rpm} min={1} max={299} step={1}
-            unit=" RPM" digits={0} accent={C.cyan} onChange={(v) => patchMotor({ rpm: v })} />
-          <Slider label="Stall torque" symbol="τ" value={motor.stall} min={10} max={400} step={1}
-            unit=" N·mm" digits={0} accent={C.cyan} onChange={(v) => patchMotor({ stall: v })} />
+        {/* ── Graph axes ─────────────────────────────────────────────────
+            The box the surface spans and the optimiser searches: bounds of
+            the plot, not properties of the robot. All typed. */}
+        <Panel title="Graph axes" open={panels.axes} onToggle={() => togglePanel('axes')}
+          icon={<Sliders size={14} color={C.dim} />} right={`${GRID_N}×${GRID_N}`}>
+          <div className="ctr-axes">
+            <span /><span className="h">min</span><span className="h">max</span><span />
+            <span className="t">x · κ</span>
+            <NumField value={kMin} min={0} max={Math.max(0, kMax - 0.1)} digits={1} step={0.5}
+              title="κ axis minimum, m⁻¹" onCommit={(v) => patchDomain({ kMin: v })} />
+            <NumField value={kMax} min={kMin + 0.1} max={1000} digits={1} step={0.5}
+              title="κ axis maximum, m⁻¹" onCommit={(v) => patchDomain({ kMax: v })} />
+            <span className="u">m⁻¹</span>
+            <span className="t">y · <M>{'L_c'}</M></span>
+            <NumField value={LcMinMm} min={0.1} max={Math.max(0.1, LcMaxMm - 0.1)} digits={1} step={5}
+              title="overlap axis minimum, mm" onCommit={(v) => patchDomain({ LcMinMm: v })} />
+            <NumField value={LcMaxMm} min={LcMinMm + 0.1} max={100000} digits={1} step={5}
+              title="overlap axis maximum, mm" onCommit={(v) => patchDomain({ LcMaxMm: v })} />
+            <span className="u">mm</span>
+            <span className="t">z · <M>{'E_snap'}</M>·η</span>
+            <NumField value={zLo} min={0} max={Math.max(0, zHi - 0.001)} digits={1} step={10}
+              title="height axis minimum, mJ" onCommit={(v) => patchDomain({ zAuto: false, zMin: v, zMax: zHi })} />
+            <NumField value={zHi} min={zLo + 0.001} max={1e7} digits={1} step={10}
+              title="height axis maximum, mJ" onCommit={(v) => patchDomain({ zAuto: false, zMin: zLo, zMax: v })} />
+            <span className="u">mJ</span>
+          </div>
+          <label className="ctr-check">
+            <input type="checkbox" checked={zAuto}
+              onChange={(e) => patchDomain({ zAuto: e.target.checked, zMin: zLo, zMax: zHi })} />
+            <span>Auto z range: 0 to the tallest design. Typing a z bound turns this off.</span>
+          </label>
+          <label className="ctr-check">
+            <input type="checkbox" checked={clip} onChange={(e) => setClip(e.target.checked)} />
+            <span>
+              Clip the κ axis at the fatigue ceiling{' '}
+              <span className="mono dim">(κ ≤ 2ε/d₀ = <Cx id="kceil">{kappaCeiling.toFixed(1)} m⁻¹</Cx>)</span>
+              {clip && kappaCeiling < kMax ? ', which is below your κ max.' : '.'}
+            </span>
+          </label>
         </Panel>
 
-        <Panel title="Water" open={panels.water} onToggle={() => togglePanel('water')}
-          icon={<Waves size={14} color={C.gold} />}>
-          <Slider label="Fin width" symbol="w" value={hydro.finW} min={2} max={25} step={0.5}
-            unit=" mm" digits={1} accent={C.gold} onChange={(v) => patchHydro({ finW: v })} />
-          <Slider label="Fin drag coeff" symbol="C_d" value={hydro.Cd} min={0.3} max={2} step={0.05}
-            unit="" accent={C.gold} onChange={(v) => patchHydro({ Cd: v })} />
-          <Slider label="Water density" symbol="ρ" value={hydro.rho} min={995} max={1030} step={1}
-            unit=" kg/m³" digits={0} accent={C.gold} onChange={(v) => patchHydro({ rho: v })} />
-          <Slider label="Fins snapping" symbol="n" value={hydro.nFins} min={1} max={4} step={1}
-            unit="" digits={0} accent={C.gold} onChange={(v) => patchHydro({ nFins: v })} />
-          <Slider label="Frontal area" symbol="A" value={hydro.area} min={4} max={100} step={1}
-            unit=" cm²" digits={0} accent={C.blue} onChange={(v) => patchHydro({ area: v })} />
-          <Slider label="Body drag coeff" symbol="C_D" value={hydro.bodyCd} min={0.2} max={1.5} step={0.05}
-            unit="" accent={C.blue} onChange={(v) => patchHydro({ bodyCd: v })} />
-        </Panel>
-
-        <Panel title="Sweep domain" open={panels.domain} onToggle={() => togglePanel('domain')}
-          icon={<Sliders size={14} color={C.dim} />}
-          right={`${GRID_N}×${GRID_N}`}>
-          <p className="ctr-p" style={{ fontSize: 11.5 }}>
-            Bounds the box the optimiser searches. These shape the surface on the
-            left; they are not properties of the robot.
-          </p>
+        <Panel title="Fatigue & scoring" open={panels.scoring} onToggle={() => togglePanel('scoring')}
+          icon={<ShieldAlert size={14} color={C.dim} />}>
           <Slider label="Target cycle life" symbol="N" value={logLife} min={6} max={12} step={0.1}
             unit="" digits={1} accent={C.red} onChange={setLogLife} />
           <div className="mono t10 dim" style={{ marginTop: -4 }}>
-            10^{logLife.toFixed(1)} cycles → ε_allow = (10/N)^(1/5) = {strainPct.toFixed(2)} %.
+            10^{logLife.toFixed(1)} cycles → ε_allow = (10/N)^(1/5) = <Cx id="allow">{strainPct.toFixed(2)} %</Cx>.
             Inverted Coffin-Manson, not the {(EPS_SUPERELASTIC * 100).toFixed(0)}% monotonic
             superelastic limit — that one is a one-time strain, not a per-cycle gate.
           </div>
-          <Slider label="Overlap ceiling" symbol="L_c" value={LcMaxMm}
-            min={40} max={LcLimitMm} step={5}
-            unit=" mm" digits={0} accent={C.gold} onChange={setLcMaxMm} />
-          <label className="ctr-numrow">
-            <span className="cap-label">Slider upper bound</span>
-            <input type="number" min={60} max={2000} step={10} value={LcLimitMm}
-              onChange={(e) => {
-                const v = Math.max(60, Math.min(2000, Number(e.target.value) || 60));
-                patchDomain({ LcLimitMm: v, LcMaxMm: Math.min(LcMaxMm, v) });
-              }} />
-            <span className="mono t10 dim">mm</span>
-          </label>
           <Slider label="Hydro saturation" symbol="k_η" value={etaK} min={0.005} max={0.5} step={0.005}
             unit="" digits={3} accent={C.blue} onChange={setEtaK} />
           <div className="mono t10 dim" style={{ marginTop: -4, lineHeight: 1.6 }}>
-            <M>{'η_hydro = 1 − exp(−k_η · ΔE)'}</M>. Engineering placeholder — no
+            <Cx id="hydro"><M>{'η_hydro = 1 − exp(−k_η · ΔE)'}</M></Cx>. Engineering placeholder — no
             physical derivation, and not a value taken from the burst-and-coast
             literature. RAISING it saturates η toward 1 for every snap, so the
             score stops rewarding size and collapses onto pure round-trip
             efficiency (λ → 3.65). LOWERING it leaves η ≈ k_η·ΔE, so the score
             scales as ΔE²/W_in and chases larger, less efficient snaps.
           </div>
-          <label className="ctr-check">
-            <input type="checkbox" checked={clip} onChange={(e) => setClip(e.target.checked)} />
-            <span>
-              Clip κ axis to the fatigue ceiling{' '}
-              <span className="mono dim">(κ ≤ 2ε/d₀ = {kappaCeiling.toFixed(1)} m⁻¹)</span>{' '}
-              so the surface only spans survivable designs.
-            </span>
-          </label>
           <div className="mono t10 dim">
-            λ/(L²κ₁κ₂) {mech.C.toFixed(3)} · energy scale {(mech.kScale * 1e3).toFixed(3)} mN·m² ·
-            grid {GRID_N}×{GRID_N}
+            λ/(L²κ₁κ₂) = <Cx id="lambda">{mech.C.toFixed(3)}</Cx> · energy scale{' '}
+            <Cx id="scale">{(mech.kScale * 1e3).toFixed(3)} mN·m²</Cx>
           </div>
         </Panel>
 
@@ -3482,7 +3688,7 @@ function OptimizerWorkspace() {
           </p>
           {analysis.biggest && best && (
             <p className="ctr-p">
-              The largest survivable snap in this domain is {(analysis.biggest.dE_J * 1000).toFixed(1)} mJ
+              The largest survivable snap in this domain is <Cx id="scale">{(analysis.biggest.dE_J * 1000).toFixed(1)} mJ</Cx>
               at κ = {analysis.biggest.kappa.toFixed(1)} m⁻¹, scoring{' '}
               {grid.maxScore > 0 ? (analysis.biggest.score / grid.maxScore).toFixed(2) : '0'} against the
               optimum: motor work per revolution rises faster than usable energy, and the hydrodynamic
@@ -3497,21 +3703,21 @@ function OptimizerWorkspace() {
           right={hover ? 'hovered' : 'optimum'}>
           {focus && (
             <>
-              <ZoneGauge label="Peak bending strain" value={focus.eb * 100}
+              <ZoneGauge label="Peak bending strain" value={focus.eb * 100} cite="eb"
                 display={`${(focus.eb * 100).toFixed(2)} %`} max={Math.max(2, strainPct * 2)}
                 bands={[
                   { upto: strainPct, color: C.green, name: `Within fatigue allowable (${strainPct.toFixed(2)}%)` },
                   { upto: EPS_SUPERELASTIC * 100, color: C.gold, name: 'Past fatigue allowable, still superelastic' },
                   { upto: 99, color: C.red, name: 'Beyond superelastic limit' },
                 ]} />
-              <ZoneGauge label="Equivalent strain (bend + torsion)" value={focus.eeq * 100}
+              <ZoneGauge label="Equivalent strain (bend + torsion)" value={focus.eeq * 100} cite="eeq"
                 display={`${(focus.eeq * 100).toFixed(2)} %`} max={Math.max(2, strainPct * 2)}
                 bands={[
                   { upto: strainPct, color: C.green, name: `Within ε_allow (${strainPct.toFixed(2)}%)` },
                   { upto: EPS_SUPERELASTIC * 100, color: C.gold, name: 'Over fatigue allowable' },
                   { upto: 99, color: C.red, name: 'Beyond superelastic limit' },
                 ]} />
-              <ZoneGauge label="Torsional energy stored" value={focus.stored_J * 1000}
+              <ZoneGauge label="Torsional energy stored" value={focus.stored_J * 1000} cite="stored"
                 display={`${(focus.stored_J * 1000).toFixed(2)} mJ`}
                 max={Math.max(1, (best?.stored_J ?? 0) * 2000)}
                 bands={[
@@ -3522,7 +3728,7 @@ function OptimizerWorkspace() {
               <div className="row" style={{ justifyContent: 'space-between', paddingTop: 2 }}>
                 <span className="t11 mut">Cycle life <span className="t9 dim">(ranking only)</span></span>
                 <span className="mono t12" style={{ color: lifeCat(focus.N).c }}>
-                  {lifeCat(focus.N).t} · {fmtN(focus.N)}
+                  {lifeCat(focus.N).t} · <Cx id="life">{fmtN(focus.N)}</Cx>
                 </span>
               </div>
             </>
@@ -3534,193 +3740,40 @@ function OptimizerWorkspace() {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   8b · WORKSPACE C — PROPULSION
+   8b · CITATION POPOVER
+   What a click on a calculated number opens: the formula, its provenance
+   and its sources, with the way through to the full entry.
    ═══════════════════════════════════════════════════════════════ */
-/* Read-only by design. Motor and water parameters used to be local state
-   here, which meant this tab and the optimiser could disagree about the same
-   physical robot. They now come from the shared store and are edited in one
-   place; what is left on this tab is the derived performance. */
-function PropulsionWorkspace() {
-  const { sim, motor, hydro, themeTick, mech } = useDesign();
-  const { LcMm, k1, k2 } = sim;
-  const lambda = bifurcation(k1, k2, LcMm / 1000, mech);
-  const Lc = LcMm / 1000;
-  const [side, setSide] = useState(true);
-  const [panels, togglePanel] = usePanels({ nosnap: true, energy: true, torque: true, thrust: true, inputs: false });
+const KIND_CSS = {
+  adopted: 'var(--signal-good)', derived: 'var(--riverside-blue-500)', assumed: 'var(--signal-watch)',
+};
 
-  const R = useMemo(() => propulsion(lambda, Lc, motor, hydro, mech), [lambda, Lc, motor, hydro, mech]);
-
-  const canvasRef = useRef(null);
-  useEffect(() => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const dpr = Math.min(window.devicePixelRatio, 2);
-    const box = canvas.parentElement;
-    const w = box.clientWidth, h = box.clientHeight;
-    if (w < 2 || h < 2) return;
-    canvas.style.width = '100%'; canvas.style.height = '100%';
-    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
-    const ctx = canvas.getContext('2d');
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = C.panel; ctx.fillRect(0, 0, w, h);
-
-    const pad = { l: 58, r: 16, t: 18, b: 38 };
-    const A = Math.PI * 2;
-    const all = [...R.loop.up.pts, ...R.loop.down.pts];
-    let tMin = Infinity, tMax = -Infinity;
-    all.forEach((p) => { if (p.th < tMin) tMin = p.th; if (p.th > tMax) tMax = p.th; });
-    if (!Number.isFinite(tMin)) { tMin = -A; tMax = A; }
-    const m = Math.max((tMax - tMin) * 0.08, 0.2);
-    tMin -= m; tMax += m;
-    const X = (a) => pad.l + ((a + A) / (2 * A)) * (w - pad.l - pad.r);
-    const Y = (t) => h - pad.b - ((t - tMin) / (tMax - tMin)) * (h - pad.t - pad.b);
-
-    ctx.save();
-    ctx.strokeStyle = C.grid; ctx.lineWidth = 1; ctx.beginPath();
-    for (let i = 0; i <= 8; i++) {
-      const x = Math.round(pad.l + ((w - pad.l - pad.r) * i) / 8) + 0.5;
-      ctx.moveTo(x, pad.t); ctx.lineTo(x, h - pad.b);
-    }
-    for (let i = 0; i <= 5; i++) {
-      const y = Math.round(pad.t + ((h - pad.t - pad.b) * i) / 5) + 0.5;
-      ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y);
-    }
-    ctx.stroke(); ctx.restore();
-
-    // θ = α reference — where the tip would sit with no bifurcation at all.
-    ctx.save();
-    ctx.strokeStyle = 'rgba(148,163,184,0.30)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(X(-A), Y(-A)); ctx.lineTo(X(A), Y(A)); ctx.stroke();
-    ctx.restore();
-
-    // Each direction is one continuous run, broken at the snaps; the vertical
-    // connector at a break IS the snap, drawn dashed so it is not read as
-    // states the tube actually passes through.
-    const drawRun = (run, color) => {
-      ctx.save();
-      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-      ctx.strokeStyle = color; ctx.lineWidth = 2.2;
-      ctx.beginPath();
-      let pen = false;
-      run.pts.forEach((p) => {
-        if (p.snap) { ctx.stroke(); ctx.beginPath(); pen = false; }
-        if (!pen) { ctx.moveTo(X(p.a), Y(p.th)); pen = true; }
-        else ctx.lineTo(X(p.a), Y(p.th));
-      });
-      ctx.stroke();
-      ctx.restore();
-
-      ctx.save();
-      ctx.strokeStyle = C.unstable; ctx.lineWidth = 1.4; ctx.setLineDash([3, 3]);
-      run.snaps.forEach((s) => {
-        ctx.beginPath(); ctx.moveTo(X(s.a), Y(s.from)); ctx.lineTo(X(s.a), Y(s.to)); ctx.stroke();
-      });
-      ctx.setLineDash([]);
-      ctx.fillStyle = C.unstable;
-      run.snaps.forEach((s) => {
-        ctx.beginPath(); ctx.arc(X(s.a), Y(s.to), 3.2, 0, Math.PI * 2); ctx.fill();
-      });
-      ctx.restore();
-    };
-    drawRun(R.loop.up, C.sand);
-    drawRun(R.loop.down, C.blue);
-
-    drawAxes(ctx, {
-      w, h, pad, X, Y,
-      xTicks: piTicks(A), yTicks: piTicks(Math.max(Math.abs(tMin), Math.abs(tMax))),
-      xLabel: 'base twist  α  (rad)',
-      yLabel: 'tip twist  θ  (rad)',
-    });
-    ctx.font = '10px ui-monospace, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-    ctx.fillStyle = C.sand; ctx.fillText('■ α increasing', pad.l + 8, pad.t + 12);
-    ctx.fillStyle = C.blue; ctx.fillText('■ α decreasing', pad.l + 96, pad.t + 12);
-  }, [R, themeTick]);          // themeTick: the plot is drawn in palette colours
-
-  const mJ = (j) => (j * 1000).toFixed(1);
-  const pill = (ok, warn) => (ok ? C.green : warn ? C.gold : C.unstable);
-
+function CitePop({ pop, onGo }) {
+  const e = EQ_BY_ID[pop.id];
+  const html = useMemo(() => katex.renderToString(e.tex, { throwOnError: false }), [e]);
+  const W = 340;
+  const left = Math.max(12, Math.min(pop.x - 20, window.innerWidth - W - 12));
+  const below = pop.y + 16 + 230 < window.innerHeight;
+  const style = { '--k': KIND_CSS[e.kind], left, ...(below ? { top: pop.y + 16 } : { bottom: window.innerHeight - pop.y + 12 }) };
   return (
-    <div className="ctr-body">
-      <div className="ctr-view" style={{ display: 'flex', flexDirection: 'column', padding: 14, gap: 10 }}>
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <span className="t11" style={{ color: '#cbd5e1' }}>Hysteresis staircase</span>
-          <span className="mono t10 dim">λ = {lambda.toFixed(2)} · {R.snapsPerRev} snap/rev</span>
-        </div>
-        <div className="ctr-plotbox" style={{ flex: 1 }}><canvas ref={canvasRef} /></div>
-        <p className="ctr-p" style={{ margin: 0 }}>
-          Sweeping α up and back down snaps at <b>different</b> angles, so the two runs
-          do not retrace each other. The enclosed area is the energy lost per cycle —
-          the tip's state depends on where it has been, not just where the motor is now.
-        </p>
+    <div className="ctr-pop" style={style} onClick={(ev) => ev.stopPropagation()} role="dialog">
+      <div className="hd">
+        <span className="k">{KIND[e.kind].label}</span>
+        <span className="n">§{EQ_NUM[e.id]}</span>
+        <span className="ttl">{e.title}</span>
       </div>
-
-      <SideBar title="Performance" open={side} onToggle={() => setSide((v) => !v)} scroll>
-        {!R.snapCapable ? (
-          <Panel title="No snap" open={panels.nosnap} onToggle={() => togglePanel('nosnap')}
-            icon={<ShieldAlert size={14} color={C.unstable} />}>
-            <p className="ctr-p">
-              λ = {lambda.toFixed(2)} is below π²/4, so the tip tracks the motor smoothly and
-              never releases an impulse. Raise κ₁, κ₂ or L_c under <b>Current design</b> on the
-              optimisation tab — λ is their product, so a straight tube on either side gives
-              zero thrust.
-            </p>
-          </Panel>
-        ) : (
-          <>
-            <Panel title="Energy budget" open={panels.energy} onToggle={() => togglePanel('energy')}
-              icon={<Zap size={14} color={C.gold} />}>
-              <Row k="Released per snap" v={`${mJ(R.released)} mJ`} c={C.gold} />
-              <Row k="Motor work per rev" v={`${mJ(R.motorPerRev)} mJ`} c={C.dim} />
-              <Row k="Margin [%]" v={`${(R.energyMargin * 100).toFixed(0)} %`}
-                c={pill(R.energyMargin >= 1.15, R.energyMargin >= 1)} />
-              <Row k="Tip jump Δθ" v={`${((R.dTip * 180) / Math.PI).toFixed(0)}°`} c={C.cyan} />
-            </Panel>
-
-            <Panel title="Torque check" open={panels.torque} onToggle={() => togglePanel('torque')}
-              icon={<Activity size={14} color={C.cyan} />}>
-              <Row k="Peak reaction" v={`${(R.peakTorque * 1000).toFixed(1)} N·mm`} c={C.dim} />
-              <Row k="Available @ ω" v={`${(R.avail * 1000).toFixed(1)} N·mm`} c={C.dim} />
-              <Row k="Margin [–]" v={`${R.torqueMargin.toFixed(2)}×`}
-                c={pill(R.torqueMargin >= 1.3, R.torqueMargin >= 1)} />
-              <p className="ctr-p" style={{ marginTop: 4 }}>
-                Quasi-static. Rotor inertia can carry a brief deficit, but a sustained one
-                bogs the motor down and delays the snap.
-              </p>
-            </Panel>
-
-            <Panel title="Thrust" open={panels.thrust} onToggle={() => togglePanel('thrust')}
-              icon={<ArrowUpRight size={14} color={C.green} />}>
-              <Row k="Jet velocity" v={`${(R.vJet * 100).toFixed(1)} cm/s`} c={C.cyan} />
-              <Row k="Avg thrust power" v={`${(R.Pthrust * 1000).toFixed(0)} mW`} c={C.dim} />
-              <Row k="Cruise speed" v={`${(R.vCruise * 100).toFixed(1)} cm/s`} c={C.green} />
-              <p className="ctr-p" style={{ marginTop: 4 }}>
-                Cruise balances average thrust power against ½ρC_D A v³. The model is
-                frictionless and ignores superelastic hysteresis loss and added mass, so
-                treat every number here as an optimistic upper bound.
-              </p>
-            </Panel>
-          </>
-        )}
-
-        {/* The inputs behind the numbers above, shown so this tab is readable
-            on its own — but edited on the optimisation tab, which owns them. */}
-        <Panel title="Inputs in force" open={panels.inputs} onToggle={() => togglePanel('inputs')}
-          icon={<Sliders size={14} color={C.dim} />} right="read-only">
-          <div className="ctr-spec" style={{ flexDirection: 'column', gap: 3 }}>
-            <span>κ₁ <b>{k1.toFixed(1)}</b> m⁻¹ · κ₂ <b>{k2.toFixed(1)}</b> m⁻¹ · L_c <b>{LcMm.toFixed(0)}</b> mm</span>
-            <span>ω₀ <b>{motor.rpmNoLoad}</b> RPM · ω <b>{motor.rpm}</b> RPM · τ <b>{motor.stall}</b> N·mm</span>
-            <span>w <b>{hydro.finW}</b> mm · C_d <b>{hydro.Cd}</b> · ρ <b>{hydro.rho}</b> kg/m³ · n <b>{hydro.nFins}</b></span>
-            <span>A <b>{hydro.area}</b> cm² · C_D <b>{hydro.bodyCd}</b></span>
-            <span>OD/ID outer <b>{(mech.t1.d_o * 1e3).toFixed(2)}/{(mech.t1.d_i * 1e3).toFixed(2)}</b> ·
-              inner <b>{(mech.t2.d_o * 1e3).toFixed(2)}/{(mech.t2.d_i * 1e3).toFixed(2)}</b> mm ·
-              outer <b>{mech.outerLocked ? 'locked' : 'free'}</b></span>
-          </div>
-          <p className="ctr-p" style={{ fontSize: 11.5 }}>
-            Change any of these under <b>Motor</b>, <b>Water</b> or <b>Current design</b> on the
-            optimisation tab.
-          </p>
-        </Panel>
-      </SideBar>
+      <div className="eq" dangerouslySetInnerHTML={{ __html: html }} />
+      <div className="src">
+        {e.src?.length
+          ? e.src.map(([k, at]) => `${REF_BY_KEY[k].short}, ${at}`).join(' · ')
+          : 'Standard result, no project source'}
+      </div>
+      <div className="row" style={{ justifyContent: 'space-between', gap: 10 }}>
+        <span className="val" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {pop.value ? `value: ${pop.value}` : ''}
+        </span>
+        <button className="ctr-btn primary" style={{ flex: 'none', width: 'auto' }} onClick={onGo}><BookOpen size={13} /> Open citation</button>
+      </div>
     </div>
   );
 }
@@ -3731,6 +3784,29 @@ function PropulsionWorkspace() {
 export default function CTRWorkbench() {
   const store = useDesignStore();
   const [tab, setTab] = useState('sim');
+  // Click-to-cite: the popover a number opens, the entry to land on, and
+  // the tab to offer a way back to.
+  const [pop, setPop] = useState(null);
+  const [citeFocus, setCiteFocus] = useState(null);
+  const [backTab, setBackTab] = useState(null);
+  const openCite = useCallback((id, value, ev) => {
+    if (!EQ_BY_ID[id]) return;
+    setPop({ id, value, x: ev.clientX, y: ev.clientY });
+  }, []);
+  useEffect(() => {
+    if (!pop) return undefined;
+    const close = () => setPop(null);
+    const key = (e) => { if (e.key === 'Escape') setPop(null); };
+    window.addEventListener('click', close);
+    window.addEventListener('keydown', key);
+    return () => { window.removeEventListener('click', close); window.removeEventListener('keydown', key); };
+  }, [pop]);
+  const goCite = () => {
+    setCiteFocus({ id: pop.id, value: pop.value, stamp: Date.now() });
+    setBackTab(tab === 'cite' ? backTab : tab);
+    setPop(null);
+    setTab('cite');
+  };
   // Instrument/data-dense screens default to the dark surface (BRAND.md
   // component defaults). The token file supports both, so the choice is a
   // default rather than a lock-in.
@@ -3757,11 +3833,11 @@ export default function CTRWorkbench() {
   const tabs = [
     { id: 'sim', label: 'Interactive 3D simulator', icon: Activity },
     { id: 'opt', label: 'Design optimization', icon: Boxes },
-    { id: 'prop', label: 'Propulsion', icon: Waves },
+    { id: 'cite', label: 'Citations', icon: BookOpen },
   ];
 
   return (
-    <DesignCtx.Provider value={{ ...store, themeTick }}>
+    <DesignCtx.Provider value={{ ...store, themeTick, openCite }}>
       <style>{CSS}</style>
       <div className="ctr">
         <header className="ctr-hdr">
@@ -3787,7 +3863,12 @@ export default function CTRWorkbench() {
         </header>
         {tab === 'sim' && <SimulatorWorkspace />}
         {tab === 'opt' && <OptimizerWorkspace />}
-        {tab === 'prop' && <PropulsionWorkspace />}
+        {tab === 'cite' && (
+          <CitationsPage focus={citeFocus}
+            backLabel={tabs.find((t) => t.id === backTab)?.label}
+            onBack={backTab ? () => setTab(backTab) : null} />
+        )}
+        {pop && <CitePop pop={pop} onGo={goCite} />}
       </div>
     </DesignCtx.Provider>
   );

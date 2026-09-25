@@ -1,0 +1,13 @@
+%% 1. Physical Parameters (Estimated for Nitinol Tubes)
+% You can adjust these parameters to match your specific hardware
+E = 50e9;         % Young's modulus for Nitinol (Pa)
+nu = 0.33;        % Poisson's ratio
+G = E/(2*(1+nu)); % Shear modulus (Pa)
+
+OD = 1.47e-3;      % Outer diameter of the inner tube (m)
+ID = 1.28e-3;      % Inner diameter of the inner tube (m)
+I = (pi/64) * (OD^4 - ID^4); % Area moment of inertia (m^4)
+J = 2 * I;        % Polar moment of inertia (m^4)
+
+kb = E * I;       % Bending stiffness (N*m^2)
+kt = G * J;       % Torsional stiffness (N*m^2)

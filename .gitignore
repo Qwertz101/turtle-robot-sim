@@ -2,3 +2,6 @@ node_modules
 dist
 .DS_Store
 *.local
+
+# Source papers: copyrighted / unpublished, kept local only (cited by DOI in-app)
+*.pdf
