@@ -441,10 +441,30 @@ const hexInt = (h) => {
 /* ═══════════════════════════════════════════════════════════════
    2 · SHARED TORSIONAL MODEL
    V(θ) = ½(θ−α)² − λcos θ ; V′ = (θ−α) + λ sin θ ; V″ = 1 + λ cos θ
+
+   PLANAR OUTER TUBE adds one term, + ½μ sin²θ (see pairMechanics). μ
+   defaults to 0, and with μ = 0 every expression below is the original one
+   term for term, so the clamped and fully-constrained modes are untouched.
+     V  = ½(θ−α)² − λcos θ + ½μ sin²θ
+     V′ = (θ−α) + λ sin θ + μ sin θ cos θ
+     V″ = 1 + λ cos θ + μ cos 2θ
    ═══════════════════════════════════════════════════════════════ */
-const energy = (th, a, l) => 0.5 * (th - a) ** 2 - l * Math.cos(th);
-const gradient = (th, a, l) => (th - a) + l * Math.sin(th);
-const stiffness = (th, l) => 1 + l * Math.cos(th);
+const energy = (th, a, l, mu = 0) => 0.5 * (th - a) ** 2 - l * Math.cos(th) + 0.5 * mu * Math.sin(th) ** 2;
+const gradient = (th, a, l, mu = 0) => (th - a) + l * Math.sin(th) + mu * Math.sin(th) * Math.cos(th);
+const stiffness = (th, l, mu = 0) => 1 + l * Math.cos(th) + mu * Math.cos(2 * th);
+
+/** Effective bifurcation parameter, λ_eff = −min_θ (λ cos θ + μ cos 2θ).
+ *  The second-variation operator is Sh = −h″ + (λ cos θ + μ cos 2θ) h
+ *  (Gilbert et al. Eq. (19) with the planar term), so by the same comparison
+ *  argument the paper uses (p. 26) every configuration is stable while
+ *  λ_eff ≤ π²/4. With μ = 0 it is exactly λ. Closed form: the minimum of
+ *  λc + μ(2c² − 1) over c = cos θ ∈ [−1, 1]. */
+function lamEff(l, mu = 0) {
+  if (!(mu > 0)) return l;
+  return l >= 4 * mu ? l - mu : (l * l) / (8 * mu) + mu;
+}
+/** μ for a design: zero unless the outer tube is held planar. */
+const muOf = (mech, Lc, k2) => (mech.Cmu ? mech.Cmu * Lc * Lc * k2 * k2 : 0);
 
 /* ═══════════════════════════════════════════════════════════════
    3 · KINEMATICS (Bishop frame, Euler–Rodrigues)
@@ -481,7 +501,7 @@ function rodrigues(vx, vy, vz) {
  *  @param Lc overlap length (m) — sets the ARC LENGTH of the curved section,
  *         so the rendered tube physically lengthens with the L_c slider.
  *  @returns pts in millimetres. */
-function integrateShape(alpha, thetaTip, k1, k2, Lc, Lext, w1 = 0.5, w2 = 0.5) {
+function integrateShape(alpha, thetaTip, k1, k2, Lc, Lext, w1 = 0.5, w2 = 0.5, wy = w2) {
   const ds = Lc / N_STEPS;
   let R = eye3(), px = 0, py = 0, pz = 0;
   const pts = [new THREE.Vector3(0, 0, 0)];
@@ -494,7 +514,9 @@ function integrateShape(alpha, thetaTip, k1, k2, Lc, Lext, w1 = 0.5, w2 = 0.5) {
     const s = i / N_STEPS;
     const th = alpha + (thetaTip - alpha) * s;
     const Kx = w1 * k1 + w2 * k2 * Math.cos(th);
-    const Ky = w2 * k2 * Math.sin(th);
+    // wy = w2 normally; 0 when the outer tube is held in its plane, which
+    // is exactly the statement that the overlap cannot curve out of it.
+    const Ky = wy * k2 * Math.sin(th);
     px += R[0][2] * ds; py += R[1][2] * ds; pz += R[2][2] * ds;
     pts.push(new THREE.Vector3(px * M2MM, py * M2MM, pz * M2MM));
     R = matmul3(R, rodrigues(Kx * ds, Ky * ds, 0));
@@ -525,7 +547,7 @@ function integrateShape(alpha, thetaTip, k1, k2, Lc, Lext, w1 = 0.5, w2 = 0.5) {
  *  form), with the frame held in nine scalars and nothing allocated. The snap-path efficiency needs
  *  a few hundred tips per design and the optimiser sweeps 2500 designs, so
  *  building curves there is not an option. Writes into `out` = [x, y, z]. */
-function tipPoint(alpha, thetaTip, k1, k2, Lc, Lext, w1, w2, out) {
+function tipPoint(alpha, thetaTip, k1, k2, Lc, Lext, w1, w2, out, wy = w2) {
   let r00 = 1, r01 = 0, r02 = 0, r10 = 0, r11 = 1, r12 = 0, r20 = 0, r21 = 0, r22 = 1;
   let px = 0, py = 0, pz = 0;
   const step = (Kx, Ky, ds) => {
@@ -550,7 +572,7 @@ function tipPoint(alpha, thetaTip, k1, k2, Lc, Lext, w1, w2, out) {
   const dth = (thetaTip - alpha) / N_STEPS, cd = Math.cos(dth), sd = Math.sin(dth);
   let ct = Math.cos(alpha), st = Math.sin(alpha);
   for (let i = 0; i < N_STEPS; i++) {
-    step(w1 * k1 + w2 * k2 * ct, w2 * k2 * st, ds);
+    step(w1 * k1 + w2 * k2 * ct, wy * k2 * st, ds);
     const c2 = ct * cd - st * sd; st = st * cd + ct * sd; ct = c2;
   }
   if (Lext > 1e-6) {
@@ -613,13 +635,27 @@ function tipPoint(alpha, thetaTip, k1, k2, Lc, Lext, w1, w2, out) {
 
 /** Where a snap starts and lands, for a forward sweep of α. null below the
  *  fold, where there is no snap. */
-function foldSnap(lambda) {
-  if (!(lambda > LAMBDA_CRIT)) return null;
-  const thetaPeak = Math.acos(-1 / lambda);              // fold: V″ = 0
-  const alphaSnap = thetaPeak + lambda * Math.sin(thetaPeak);
-  const g = (t) => t - alphaSnap + lambda * Math.sin(t);
+function foldSnap(lambda, mu = 0) {
+  if (!(lamEff(lambda, mu) > LAMBDA_CRIT)) return null;
+  let thetaPeak;
+  if (mu === 0) thetaPeak = Math.acos(-1 / lambda);      // fold: V″ = 0
+  else {
+    // No closed form with the planar term: follow the branch up from θ = 0
+    // to the first θ where V″ reaches zero.
+    let t = 0;
+    while (t < 2 * Math.PI && stiffness(t, lambda, mu) > 0) t += 0.002;
+    if (t >= 2 * Math.PI) return null;
+    let lo = t - 0.002, hi = t;
+    for (let k = 0; k < 50; k++) {
+      const m = (lo + hi) / 2;
+      if (stiffness(m, lambda, mu) > 0) lo = m; else hi = m;
+    }
+    thetaPeak = (lo + hi) / 2;
+  }
+  const alphaSnap = thetaPeak + lambda * Math.sin(thetaPeak) + mu * Math.sin(thetaPeak) * Math.cos(thetaPeak);
+  const g = (t) => t - alphaSnap + lambda * Math.sin(t) + mu * Math.sin(t) * Math.cos(t);
   for (let t = thetaPeak + 0.02; t < thetaPeak + 6 * Math.PI; t += 0.02) {
-    if (g(t) > 0 && stiffness(t, lambda) > 0) {
+    if (g(t) > 0 && stiffness(t, lambda, mu) > 0) {
       let lo = t - 0.02, hi = t;
       for (let k = 0; k < 40; k++) {
         const m = (lo + hi) / 2;
@@ -634,10 +670,10 @@ function foldSnap(lambda) {
 /** The minimum θ settles into from θ0 at fixed α: descent of V, Newton where
  *  V is convex (fast and stable at any λ), a plain gradient step elsewhere,
  *  each step capped so it cannot hop a basin. */
-function settle(th0, a, lambda) {
+function settle(th0, a, lambda, mu = 0) {
   let th = th0;
   for (let i = 0; i < 20000; i++) {
-    const g = gradient(th, a, lambda), k = stiffness(th, lambda);
+    const g = gradient(th, a, lambda, mu), k = stiffness(th, lambda, mu);
     if (Math.abs(g) < 1e-10 && k > 0) break;
     th += Math.max(-0.05, Math.min(0.05, k > 0.5 ? -g / k : -0.5 * g));
   }
@@ -704,13 +740,14 @@ function forwardShare(pieces, nu, nv) {
 
 /** Efficiency of one design's snap, straight from the model. Floor frame is
  *  the robot's local (x, y): η is invariant to how the floor is rotated. */
-function snapEfficiency(lambda, k1, k2, Lc, Lext, mech, fold = foldSnap(lambda)) {
+function snapEfficiency(lambda, k1, k2, Lc, Lext, mech, fold = foldSnap(lambda, muOf(mech, Lc, k2))) {
   if (!fold) return null;
   const { thetaPeak, alphaSnap, thetaStable } = fold;
+  const mu = muOf(mech, Lc, k2);
   const tmp = [0, 0, 0];
   const pts = snapStroke((th) => {
-    tipPoint(alphaSnap, th, k1, k2, Lc, Lext, mech.w1, mech.w2, tmp);
-    return [tmp[0], tmp[1], energy(th, alphaSnap, lambda)];
+    tipPoint(alphaSnap, th, k1, k2, Lc, Lext, mech.w1, mech.w2, tmp, mech.wy);
+    return [tmp[0], tmp[1], energy(th, alphaSnap, lambda, mu)];
   }, thetaPeak, thetaStable);
   const pieces = strokePieces(pts);
   const [u, v] = strokeVector(pieces);
@@ -743,13 +780,16 @@ const EPS_SUPERELASTIC = 0.08;   // MONOTONIC limit — never a cyclic safety ga
 const epsAllowFor = (N) => Math.pow(10 / N, 1 / 5);
 const LAMBDA_CRIT = Math.PI ** 2 / 4;      // 2.467, beta_sigma = 0 only
 
-/** Actuator work per revolution: ∮|τ dα|, τ = −λ sin θ, dα = (1+λcos θ)dθ */
-function motorWork(lambda) {
+/** Actuator work per revolution: ∮|τ dα|, τ = −λ sin θ, dα = (1+λcos θ)dθ.
+ *  With the planar term, τ = −(λ sin θ + μ sin θ cos θ) and dα = V″ dθ. */
+function motorWork(lambda, mu = 0) {
   let s = 0;
   const n = 200, h = (2 * Math.PI) / n;
   for (let i = 0; i < n; i++) {
     const t = h * (i + 0.5);
-    s += Math.abs(lambda * Math.sin(t) * (1 + lambda * Math.cos(t))) * h;
+    s += mu === 0
+      ? Math.abs(lambda * Math.sin(t) * (1 + lambda * Math.cos(t))) * h
+      : Math.abs((lambda * Math.sin(t) + mu * Math.sin(t) * Math.cos(t)) * stiffness(t, lambda, mu)) * h;
   }
   return s;
 }
@@ -800,7 +840,22 @@ function tubeSection(odMm, idMm) {
   const I = (Math.PI / 64) * (d_o ** 4 - d_i ** 4), J = 2 * I;     // J = 2I exact
   return { d_o, d_i, r: d_o / 2, I, J, kb: NITINOL.E * I, kt: NITINOL.G * J };
 }
-function pairMechanics(tubes, outerLocked) {
+/* PLANAR outer tube: a guide holds the sheath's centreline in its own
+   precurvature plane. It can still bend in that plane and twist about its
+   axis (the guide is taken as frictionless and torsion-free), so λ, the
+   torsional compliance and the energy scale are the clamped ones. What the
+   guide removes is out-of-plane curvature of the overlap: K_y = 0. The fin's
+   out-of-plane precurvature component κ₂ sin θ is then held flat by the
+   guide instead of being shared with the sheath, which costs bending energy
+
+       ½·k2b·κ₂²·sin²θ − ½·k_red·κ₂²·sin²θ = ½·[k2b²/(k1b+k2b)]·κ₂²·sin²θ
+
+   per unit length relative to the free pair (Gilbert et al. Eq. (2)
+   energy, minimised over the in-plane curvature). Scaled like λ, this adds
+   ½μ sin²θ to V with μ = L_c²·κ₂²·[k2b²/(k1b+k2b)]·(1/k1t + 1/k2t), which
+   for identical tubes is (1+ν)·L_c²·κ₂², the same size as λ. It pulls the
+   fin toward the plane (θ = 0 or π) and moves where the fold sits. */
+function pairMechanics(tubes, outerLocked, outerPlanar = false) {
   const t1 = tubeSection(tubes.outer.od, tubes.outer.id);
   const t2 = tubeSection(tubes.inner.od, tubes.inner.id);
   const kbRed = (t1.kb * t2.kb) / (t1.kb + t2.kb);
@@ -819,6 +874,12 @@ function pairMechanics(tubes, outerLocked) {
     w1: outerLocked ? 1 : t1.kb / (t1.kb + t2.kb),
     w2: outerLocked ? 0 : t2.kb / (t1.kb + t2.kb),
     kScale: 2 / compl,                    // N·m²; E_J = ΔV·kScale/L_c (see above)
+    // Planar mode (ignored when rigid): no out-of-plane overlap curvature,
+    // and μ = Cmu·L_c²·κ₂² in V. wy = w2 in the other two modes.
+    planar: outerPlanar && !outerLocked,
+    wy: outerPlanar && !outerLocked ? 0 : (outerLocked ? 0 : t2.kb / (t1.kb + t2.kb)),
+    Cmu: outerPlanar && !outerLocked ? complFree * (t2.kb * t2.kb) / (t1.kb + t2.kb) : 0,
+    CmuPlanar: complFree * (t2.kb * t2.kb) / (t1.kb + t2.kb),
     rMax: Math.max(t1.r, t2.r),
     clearance: tubes.outer.id - tubes.inner.od,   // mm; must be > 0 to nest
   };
@@ -843,11 +904,13 @@ function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech, Lext = 0) {
     etaP: 0, prod_J: 0,
     score: 0, thetaPeak: 0, thetaStable: 0, stored_J: 0, N: fatigueLife(eb), regime: 'stable',
   };
-  const fold = foldSnap(lambda);
+  const mu = muOf(mech, Lc, kappa);                    // 0 unless planar
+  base.mu = mu; base.lamEff = lamEff(lambda, mu);
+  const fold = foldSnap(lambda, mu);
   if (!fold) return base;
   const { thetaPeak, alphaSnap, thetaStable } = fold;
 
-  const dE = energy(thetaPeak, alphaSnap, lambda) - energy(thetaStable, alphaSnap, lambda);
+  const dE = energy(thetaPeak, alphaSnap, lambda, mu) - energy(thetaStable, alphaSnap, lambda, mu);
   const scale = mech.kScale / Lc;
   // Snap propulsion efficiency: the share of the snap's arc that pushes along
   // its own net direction. It depends on the tip's path, so on L_ext too.
@@ -867,7 +930,7 @@ function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech, Lext = 0) {
   const e2 = Math.hypot(kappa * mech.t2.r, Math.sqrt(0.33) * g2);
   const eeq = Math.max(e1, e2);
   const gamma = Math.max(g1, g2);
-  const Win = motorWork(lambda);
+  const Win = motorWork(lambda, mu);
   // ENGINEERING PLACEHOLDER (Part 6). etaK has no physical derivation and is
   // NOT from the burst-and-coast swimming paper, which supplies qualitative
   // motivation only — which is exactly why it is exposed as a control rather
@@ -879,7 +942,7 @@ function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech, Lext = 0) {
   const eta = 1 - Math.exp(-etaK * dEp);
   const gate = Math.exp(-Math.pow(eeq / strainLimit, 4));
   return {
-    kappa, Lc, lambda, eb, gamma, eeq, dE, dE_J: dE * scale, Win, eta, gate,
+    kappa, Lc, lambda, mu, lamEff: base.lamEff, eb, gamma, eeq, dE, dE_J: dE * scale, Win, eta, gate,
     etaP, prod_J: dE * scale * etaP,           // productive snap energy, J
     score: Win > 1e-9 ? eta * (dEp / Win) * gate : 0,
     thetaPeak, thetaStable, alphaSnap,
@@ -1137,7 +1200,10 @@ function useDesignStore() {
   // quantity; `mech` is derived once and read by every view.
   const [tubes, setTubes] = useState(DEFAULT_TUBES);
   const [outerLocked, setOuterLocked] = useState(false);
-  const mech = useMemo(() => pairMechanics(tubes, outerLocked), [tubes, outerLocked]);
+  // Planar: the outer tube is held in its own plane (see pairMechanics).
+  // The three outer-tube modes are exclusive; the switch sets both flags.
+  const [outerPlanar, setOuterPlanar] = useState(false);
+  const mech = useMemo(() => pairMechanics(tubes, outerLocked, outerPlanar), [tubes, outerLocked, outerPlanar]);
   const [handoff, setHandoff] = useState(null);
 
   const patchSim = useCallback((p) => setSim((s) => ({ ...s, ...p })), []);
@@ -1155,7 +1221,7 @@ function useDesignStore() {
 
   return { sim, patchSim,
     domain, patchDomain, layers, patchLayers, handoff, applyDesign,
-    tubes, patchTube, setTubes, outerLocked, setOuterLocked, mech };
+    tubes, patchTube, setTubes, outerLocked, setOuterLocked, outerPlanar, setOuterPlanar, mech };
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1338,6 +1404,8 @@ function SimulatorWorkspace() {
   const { sim, patchSim, handoff, layers, patchLayers, themeTick, mech } = useDesign();
   const { alphaDeg, LcMm, extMm, k1, k2 } = sim;
   const lambda = bifurcation(k1, k2, LcMm / 1000, mech);
+  const mu = muOf(mech, LcMm / 1000, k2);                 // 0 unless planar
+  const lamE = lamEff(lambda, mu);                        // = λ unless planar
   const [sweeping, setSweeping] = useState(false);
   const [slow, setSlow] = useState(false);
   const [topView, setTopView] = useState(false);
@@ -1361,13 +1429,14 @@ function SimulatorWorkspace() {
   const [panels, togglePanel] = usePanels({ energy: true, scurve: true });
   const [hud, setHud] = useState({ theta: 0, alpha: 0, kres: 0, V: 0, Vpp: 1, vel: 0, snapping: false });
 
-  const P = useRef({ alpha: 0, lambda, k1, k2, Lc: LcMm / 1000, Lext: extMm / 1000,
-    sweeping: false, slow: false, layers, w1: mech.w1, w2: mech.w2, kScale: mech.kScale });
+  const P = useRef({ alpha: 0, lambda, mu, lamE, k1, k2, Lc: LcMm / 1000, Lext: extMm / 1000,
+    sweeping: false, slow: false, layers, w1: mech.w1, w2: mech.w2, wy: mech.wy, planar: mech.planar,
+    kScale: mech.kScale });
   useEffect(() => {
-    P.current = { alpha: (alphaDeg * Math.PI) / 180, lambda, k1, k2,
+    P.current = { alpha: (alphaDeg * Math.PI) / 180, lambda, mu, lamE, k1, k2,
       Lc: LcMm / 1000, Lext: extMm / 1000, sweeping, slow, layers,
-      w1: mech.w1, w2: mech.w2, kScale: mech.kScale };
-  }, [alphaDeg, lambda, k1, k2, LcMm, extMm, sweeping, slow, layers, mech]);
+      w1: mech.w1, w2: mech.w2, wy: mech.wy, planar: mech.planar, kScale: mech.kScale };
+  }, [alphaDeg, lambda, mu, lamE, k1, k2, LcMm, extMm, sweeping, slow, layers, mech]);
 
   const theta = useRef(0), vel = useRef(0), flash = useRef(0), subAccum = useRef(0);
   const snapEv = useRef(null);                            // in-flight snap, for the compass
@@ -1511,6 +1580,22 @@ function SimulatorWorkspace() {
 
     const robot = new THREE.Group();
     robot.rotation.x = -Math.PI / 2; robot.position.y = -60; scene.add(robot);
+
+    /* Planar-mode guide: the robot-local x = 0 plane, the plane the outer
+       tube's own precurvature bends in (K_x rotates about local x). Drawn
+       as a faint sheet with an outline, and only in planar mode. */
+    const guideMat = new THREE.MeshBasicMaterial({
+      color: hexInt(C.accent), transparent: true, opacity: 0.07, side: THREE.DoubleSide, depthWrite: false,
+    });
+    const guideGeo = new THREE.PlaneGeometry(1, 1);
+    const guide = new THREE.Mesh(guideGeo, guideMat);
+    const guideEdge = new THREE.LineSegments(new THREE.EdgesGeometry(guideGeo),
+      new THREE.LineBasicMaterial({ color: hexInt(C.accent), transparent: true, opacity: 0.45 }));
+    const guideGroup = new THREE.Group();
+    guideGroup.add(guide, guideEdge);
+    guideGroup.rotation.y = Math.PI / 2;               // XY plane → local YZ plane
+    guideGroup.visible = false;
+    robot.add(guideGroup);
 
 
     /* Both tubes are OPAQUE. A metal has a skin depth of order 10 nm in the
@@ -1835,6 +1920,7 @@ function SimulatorWorkspace() {
       scene.background = new THREE.Color(C.bg);
       planFog.color.setHex(hexInt(C.bg));
       matGlow.color.setHex(hexInt(C.cyan));
+      guideMat.color.setHex(hexInt(C.accent)); guideEdge.material.color.setHex(hexInt(C.accent));
       arrows.k1.setColor(new THREE.Color(hexInt(C.blue)));
       arrows.k2.setColor(new THREE.Color(hexInt(C.sand)));
       arrows.res.setColor(new THREE.Color(hexInt(C.ink)));
@@ -2211,7 +2297,7 @@ function SimulatorWorkspace() {
     resize();
     const ro = new ResizeObserver(resize); ro.observe(mount);
 
-    three.current = { scene, camera, renderer, outer, inner, core, glow, tipOrb, arrows, matCore, matGlow, matInner, matOuter, setTop, tracks, robot, restyle, renderCube, tick, setCubeVisible, compass, setHeadingUp,
+    three.current = { scene, camera, renderer, outer, inner, core, glow, tipOrb, arrows, matCore, matGlow, matInner, matOuter, setTop, tracks, robot, restyle, renderCube, tick, setCubeVisible, compass, setHeadingUp, guideGroup,
       cam: () => (planOn ? ortho : camera),
       reframe: () => { cam.r = frameR(); cam.tx = 0; cam.ty = 0; applyCam(); } };
     return () => {
@@ -2353,7 +2439,7 @@ function SimulatorWorkspace() {
     ctx.restore();
   };
 
-  const drawEnergy = (a, l, th, snap) => {
+  const drawEnergy = (a, l, th, snap, mu = 0) => {
     const canvas = energyRef.current; if (!canvas) return;
     const surf = prepCanvas(canvas); if (!surf) return;
     const { ctx, w, h } = surf;
@@ -2362,7 +2448,7 @@ function SimulatorWorkspace() {
     const N = 600;
     let vmin = Infinity, vmax = -Infinity; const raw = [];
     for (let i = 0; i <= N; i++) {
-      const t = t0 + ((t1 - t0) * i) / N, v = energy(t, a, l);
+      const t = t0 + ((t1 - t0) * i) / N, v = energy(t, a, l, mu);
       raw.push([t, v]); if (v < vmin) vmin = v; if (v > vmax) vmax = v;
     }
     const span = Math.max(vmax - vmin, 1e-6);
@@ -2379,7 +2465,7 @@ function SimulatorWorkspace() {
     g.addColorStop(0, rgba(C.green, 0.16)); g.addColorStop(1, rgba(C.green, 0));
     ctx.fillStyle = g; ctx.fill();
 
-    const pts = raw.map(([t, v]) => [X(t), Y(v), stiffness(t, l) > 0]);
+    const pts = raw.map(([t, v]) => [X(t), Y(v), stiffness(t, l, mu) > 0]);
     strokeRuns(ctx, pts, {
       stable: { color: C.green, width: 2.2, dash: [] },
       unstable: { color: C.unstable, width: 1.8, dash: [5, 4] },
@@ -2388,23 +2474,23 @@ function SimulatorWorkspace() {
     ctx.save();
     ctx.lineWidth = 1.6;
     for (let i = 1; i < raw.length; i++) {
-      const g0 = gradient(raw[i - 1][0], a, l), g1 = gradient(raw[i][0], a, l);
+      const g0 = gradient(raw[i - 1][0], a, l, mu), g1 = gradient(raw[i][0], a, l, mu);
       if (g0 !== 0 && g0 * g1 > 0) continue;
       let lo = raw[i - 1][0], hi = raw[i][0];
       for (let k = 0; k < 40; k++) {
         const m = (lo + hi) / 2;
-        if (gradient(lo, a, l) * gradient(m, a, l) <= 0) hi = m; else lo = m;
+        if (gradient(lo, a, l, mu) * gradient(m, a, l, mu) <= 0) hi = m; else lo = m;
       }
-      const te = (lo + hi) / 2, stable = stiffness(te, l) > 0;
+      const te = (lo + hi) / 2, stable = stiffness(te, l, mu) > 0;
       ctx.strokeStyle = stable ? C.cyan : C.unstable;
       ctx.setLineDash(stable ? [] : [2, 1.6]);
-      ctx.beginPath(); ctx.arc(X(te), Y(energy(te, a, l)), 3.4, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(X(te), Y(energy(te, a, l, mu)), 3.4, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.restore();
 
     strokeTrail(ctx, trail.current.map((p) => [X(p[0]), Y(p[1])]), (hexToRgb(C.sand) || [210, 181, 121]).join(","));
 
-    const bx = X(th), by = Y(energy(th, a, l));
+    const bx = X(th), by = Y(energy(th, a, l, mu));
     const halo = ctx.createRadialGradient(bx, by, 1, bx, by, 20);
     halo.addColorStop(0, rgba(snap ? C.unstable : C.sand, 0.8));
     halo.addColorStop(1, rgba(snap ? C.unstable : C.sand, 0));
@@ -2426,7 +2512,7 @@ function SimulatorWorkspace() {
     });
   };
 
-  const drawSCurve = (a, l, th) => {
+  const drawSCurve = (a, l, th, mu = 0) => {
     const canvas = scurveRef.current; if (!canvas) return;
     const surf = prepCanvas(canvas); if (!surf) return;
     const { ctx, w, h } = surf;
@@ -2434,7 +2520,7 @@ function SimulatorWorkspace() {
     const TY = Math.max(3 * Math.PI, Math.abs(th) + 1.5);
     // The branch is α = θ + λ sin θ, so α reaches ±(TY + λ). Pinning the axis
     // at ±2π made the curve run off the panel as soon as λ grew.
-    const AX = Math.max(2 * Math.PI, TY + l + 0.5, Math.abs(a) + 0.5);
+    const AX = Math.max(2 * Math.PI, TY + l + 0.5 * mu + 0.5, Math.abs(a) + 0.5);
     const X = (v) => pad.l + ((v + AX) / (2 * AX)) * (w - pad.l - pad.r);
     const Y = (v) => h - pad.b - ((v + TY) / (2 * TY)) * (h - pad.t - pad.b);
     const plot = () => { ctx.beginPath(); ctx.rect(pad.l, pad.t, w - pad.l - pad.r, h - pad.t - pad.b); ctx.clip(); };
@@ -2451,7 +2537,7 @@ function SimulatorWorkspace() {
     const N = 1400, pts = [];
     for (let i = 0; i <= N; i++) {
       const t = -TY + (2 * TY * i) / N;
-      pts.push([X(t + l * Math.sin(t)), Y(t), stiffness(t, l) > 0]);
+      pts.push([X(t + l * Math.sin(t) + mu * Math.sin(t) * Math.cos(t)), Y(t), stiffness(t, l, mu) > 0]);
     }
     // Unstable branch: bright and dashed, never dark. Encoding the distinction
     // in dash and weight keeps both branches legible against the panel.
@@ -2521,7 +2607,7 @@ function SimulatorWorkspace() {
       const steps = Math.floor(subAccum.current);
       subAccum.current -= steps;
       for (let i = 0; i < steps; i++) {
-        const gr = gradient(theta.current, a, p.lambda);
+        const gr = gradient(theta.current, a, p.lambda, p.mu);
         let v = MOM * vel.current - LR * gr;
         v = Math.max(-0.25, Math.min(0.25, v));
         vel.current = v; theta.current += v;
@@ -2533,7 +2619,7 @@ function SimulatorWorkspace() {
         : 0;
       // A snap needs a fold to fall off; without one (λ ≤ π²/4) there is
       // nothing to detect, and the wrap frame is never a physical event.
-      if (!wrapped && p.lambda > LAMBDA_CRIT && rate > SNAP_THRESHOLD) flash.current = 0.45;
+      if (!wrapped && p.lamE > LAMBDA_CRIT && rate > SNAP_THRESHOLD) flash.current = 0.45;
       flash.current = Math.max(0, flash.current - dt);
       const snapping = flash.current > 0;
       /* Snap bookkeeping for the compass. A snap is detected on the frame
@@ -2548,12 +2634,12 @@ function SimulatorWorkspace() {
          optimiser evaluates, so the two efficiencies agree. */
       if (snapping && !snapEv.current) snapEv.current = { th: before, a };
 
-      trail.current.push([theta.current, energy(theta.current, a, p.lambda)]);
+      trail.current.push([theta.current, energy(theta.current, a, p.lambda, p.mu)]);
       if (trail.current.length > 26) trail.current.shift();
 
       const T = three.current;
       if (T.renderer) {
-        const { pts, Rtip, Rmid, nOverlap } = integrateShape(a, theta.current, p.k1, p.k2, p.Lc, p.Lext, p.w1, p.w2);
+        const { pts, Rtip, Rmid, nOverlap } = integrateShape(a, theta.current, p.k1, p.k2, p.Lc, p.Lext, p.w1, p.w2, p.wy);
         const curve = new THREE.CatmullRomCurve3(pts);
         const swap = (m, geo) => { m.geometry.dispose(); m.geometry = geo; };
         // The sheath ends exactly where the OVERLAP ends — no arbitrary
@@ -2567,17 +2653,28 @@ function SimulatorWorkspace() {
         T.matInner.emissiveIntensity = snapping ? 1.6 : 0;
         const tip = pts[pts.length - 1];
         const mid = pts[nOverlap];
+        if (T.guideGroup) {
+          // Sized to the sheath's reach each frame: it spans the overlap in
+          // local z and both sides of the axis in local y.
+          T.guideGroup.visible = !!p.planar;
+          if (p.planar) {
+            const reach = Math.max(40, p.Lc * 1000 * 1.1);
+            T.guideGroup.scale.set(1, 1, 1);
+            T.guideGroup.children.forEach((c) => c.scale.set(reach * 1.4, reach * 2, 1));
+            T.guideGroup.position.set(0, 0, reach * 0.5);
+          }
+        }
         const tipW = T.robot.localToWorld(tip.clone());
         if (!snapping && snapEv.current) {
           const ev = snapEv.current; snapEv.current = null;
-          const land = ev && p.lambda > LAMBDA_CRIT ? settle(ev.th, ev.a, p.lambda) : null;
+          const land = ev && p.lamE > LAMBDA_CRIT ? settle(ev.th, ev.a, p.lambda, p.mu) : null;
           if (land !== null && Math.abs(land - ev.th) > 0.3) {
-            const dE = energy(ev.th, ev.a, p.lambda) - energy(land, ev.a, p.lambda);
+            const dE = energy(ev.th, ev.a, p.lambda, p.mu) - energy(land, ev.a, p.lambda, p.mu);
             const tmp = [0, 0, 0], w = new THREE.Vector3();
             const pts = snapStroke((th) => {
-              tipPoint(ev.a, th, p.k1, p.k2, p.Lc, p.Lext, p.w1, p.w2, tmp);
+              tipPoint(ev.a, th, p.k1, p.k2, p.Lc, p.Lext, p.w1, p.w2, tmp, p.wy);
               T.robot.localToWorld(w.set(tmp[0], tmp[1], tmp[2]));
-              return [w.x, w.z, energy(th, ev.a, p.lambda)];
+              return [w.x, w.z, energy(th, ev.a, p.lambda, p.mu)];
             }, ev.th, land);
             const span = Math.hypot(pts[pts.length - 1][0] - pts[0][0], pts[pts.length - 1][1] - pts[0][1]);
             // Physical scaling as in the optimiser: E_snap = dV * k_t / L_c.
@@ -2601,7 +2698,7 @@ function SimulatorWorkspace() {
           Rmid[1][0] * x + Rmid[1][1] * y,
           Rmid[2][0] * x + Rmid[2][1] * y
         ).normalize();
-        const rx = p.w1 * p.k1 + p.w2 * p.k2 * Math.cos(th), ry = p.w2 * p.k2 * Math.sin(th);
+        const rx = p.w1 * p.k1 + p.w2 * p.k2 * Math.cos(th), ry = p.wy * p.k2 * Math.sin(th);
         const rmag = Math.hypot(rx, ry);
         // A zero-magnitude arrow still has to be hidden even when the layer is
         // lit: pointing it somewhere arbitrary would assert a direction the
@@ -2619,16 +2716,16 @@ function SimulatorWorkspace() {
         T.renderCube?.();
       }
 
-      drawEnergy(a, p.lambda, theta.current, snapping);
-      drawSCurve(a, p.lambda, theta.current);
+      drawEnergy(a, p.lambda, theta.current, snapping, p.mu);
+      drawSCurve(a, p.lambda, theta.current, p.mu);
 
       hudClock += dt;
       if (hudClock > 0.08) {
         hudClock = 0;
         const kx = p.w1 * p.k1 + p.w2 * p.k2 * Math.cos(theta.current);
-        const ky = p.w2 * p.k2 * Math.sin(theta.current);
+        const ky = p.wy * p.k2 * Math.sin(theta.current);
         setHud({ theta: theta.current, alpha: a, kres: Math.hypot(kx, ky),
-          V: energy(theta.current, a, p.lambda), Vpp: stiffness(theta.current, p.lambda), vel: rate, snapping,
+          V: energy(theta.current, a, p.lambda, p.mu), Vpp: stiffness(theta.current, p.lambda, p.mu), vel: rate, snapping,
           compass: T.compass?.stats() });
         if (p.sweeping) patchSim({ alphaDeg: Math.round((a * 180) / Math.PI) });
       }
@@ -2680,7 +2777,7 @@ function SimulatorWorkspace() {
                   </div>
                 </>
               ) : (
-                <div className="ft" style={{ marginTop: 4 }}>no snap — λ {lambda.toFixed(2)} ≤ π²/4</div>
+                <div className="ft" style={{ marginTop: 4 }}>no snap — {mech.planar ? 'λ_eff' : 'λ'} {lamE.toFixed(2)} ≤ π²/4</div>
               )}
             </div>
 
@@ -2712,8 +2809,8 @@ function SimulatorWorkspace() {
               <span><M>{'L_c'}</M> <b>{LcMm.toFixed(0)}</b> mm</span>
               <span><M>{'L_ext'}</M> <b>{extMm.toFixed(0)}</b> mm</span>
               <span>OD <b>{(mech.t1.d_o * 1e3).toFixed(2)}</b>/<b>{(mech.t2.d_o * 1e3).toFixed(2)}</b> mm</span>
-              <span style={mech.outerLocked ? { color: C.gold } : undefined}>
-                outer <b style={mech.outerLocked ? { color: C.gold } : undefined}>{mech.outerLocked ? 'fully constrained' : 'clamped at base'}</b>
+              <span style={mech.outerLocked || mech.planar ? { color: C.gold } : undefined}>
+                outer <b style={mech.outerLocked || mech.planar ? { color: C.gold } : undefined}>{mech.outerLocked ? 'fully constrained' : mech.planar ? 'held planar' : 'clamped at base'}</b>
               </span>
             </div>
           </div>
@@ -2817,7 +2914,8 @@ function SimulatorWorkspace() {
           <Panel title="Energy landscape" plot open={panels.energy}
             onToggle={() => togglePanel('energy')}
             icon={<Zap size={14} color={C.gold} />}
-            right={`V = ${(0.5 * ((hud.theta - hud.alpha) ** 2)).toFixed(2)} + ${(lambda * (1 - Math.cos(hud.theta))).toFixed(2)}`}>
+            right={`V = ${(0.5 * ((hud.theta - hud.alpha) ** 2)).toFixed(2)} + ${(lambda * (1 - Math.cos(hud.theta))).toFixed(2)}`
+              + (mu > 0 ? ` + ${(0.5 * mu * Math.sin(hud.theta) ** 2).toFixed(2)}` : '')}>
             <div className="ctr-plotbox"><canvas ref={energyRef} /></div>
           </Panel>
           <Panel title="Equilibrium map" plot open={panels.scurve}
@@ -2850,9 +2948,10 @@ function SimulatorWorkspace() {
         </div>
 
         <div className="ctr-metrics">
-          <Metric icon={<Boxes size={12} />} label="Bifurcation λ [–]" value={lambda.toFixed(2)} cite="lambda"
-            color={lambda > LAMBDA_CRIT ? C.gold : C.dim}
-            note={lambda > LAMBDA_CRIT ? "snaps" : "no fold"} />
+          <Metric icon={<Boxes size={12} />} label={mech.planar ? 'Effective λ_eff [–]' : 'Bifurcation λ [–]'}
+            value={(mech.planar ? lamE : lambda).toFixed(2)} cite={mech.planar ? 'planarCrit' : 'lambda'}
+            color={lamE > LAMBDA_CRIT ? C.gold : C.dim}
+            note={lamE > LAMBDA_CRIT ? "snaps" : "no fold"} />
           <Metric icon={<Zap size={12} />} label="Elastic V [–]" value={hud.V.toFixed(2)} color={C.gold} cite="V" />
           <Metric icon={<Gauge size={12} />} label="Lumped V″ [–]" value={hud.Vpp.toFixed(2)} cite="Vpp"
             color={unstable ? C.red : C.green} note={unstable ? 'unstable' : 'stable'} />
@@ -2888,7 +2987,7 @@ function OptimizerWorkspace() {
      of the robot at any moment. */
   const { applyDesign, sim, patchSim,
     domain, patchDomain, themeTick, tubes, patchTube, setTubes, outerLocked, setOuterLocked,
-    mech, openCite } = useDesign();
+    outerPlanar, setOuterPlanar, mech, openCite } = useDesign();
   const { LcMm, extMm, k1, k2 } = sim;
   // Part 6: the allowable strain must be justified by a target cycle life,
   // not hardcoded to the 8% monotonic superelastic limit — at 8% the gate is
@@ -2905,6 +3004,9 @@ function OptimizerWorkspace() {
     tradeoff: false, safety: false,
   });
   const designLambda = bifurcation(k1, k2, LcMm / 1000, mech);
+  const designLamE = lamEff(designLambda, muOf(mech, LcMm / 1000, k2));   // = λ unless planar
+  const setOuterMode = (m) => { setOuterLocked(m === 'rigid'); setOuterPlanar(m === 'planar'); };
+  const outerMode = mech.outerLocked ? 'rigid' : mech.planar ? 'planar' : 'clamped';
 
   const targetLife = Math.pow(10, logLife);
   const strainLimit = epsAllowFor(targetLife);
@@ -3163,7 +3265,8 @@ function OptimizerWorkspace() {
     // Signed distance to each regime boundary, as CONTINUOUS scalars. The fill
     // and the contour lines are both zero crossings of these, which is what
     // makes them land on top of one another instead of a cell apart.
-    const fLam = (i, j) => cells[j * nx + i].lambda - LAMBDA_CRIT;   // >0 snaps
+    // λ_eff: equals λ except in planar mode, where it is the snap test.
+    const fLam = (i, j) => cells[j * nx + i].lamEff - LAMBDA_CRIT;   // >0 snaps
     const fEps = (i, j) => cells[j * nx + i].eeq - strainLimit;      // >0 fails
     const fLamField = (u, v) => bicubic(fLam, u, v);
     const fEpsField = (u, v) => bicubic(fEps, u, v);
@@ -3439,7 +3542,8 @@ function OptimizerWorkspace() {
                 <Row k="Snap energy" v={`${(hover.dE_J * 1000).toFixed(2)} mJ`} c={C.gold} />
                 <Row k="Propulsion eff." v={`${(hover.etaP * 100).toFixed(0)} %`} c={C.gold} />
                 <Row k="Productive" v={`${(hover.prod_J * 1000).toFixed(2)} mJ`} c={C.gold} />
-                <Row k="λ [–]" v={hover.lambda.toFixed(2)} c={hover.lambda > LAMBDA_CRIT ? C.gold : C.dim} />
+                <Row k="λ [–]" v={hover.lambda.toFixed(2)} c={hover.lamEff > LAMBDA_CRIT ? C.gold : C.dim} />
+                {mech.planar && <Row k="λ_eff [–]" v={hover.lamEff.toFixed(2)} c={hover.lamEff > LAMBDA_CRIT ? C.gold : C.dim} />}
                 <Row k="Equiv. strain" v={`${(hover.eeq * 100).toFixed(2)} %`} c={hover.eeq > strainLimit ? C.red : C.green} />
                 <Row k="Fatigue life ~" v={`${fmtN(hover.N)} cyc`} c="#94a3b8" />
                 <Row k="Score [–]" v={grid.maxScore > 0 ? (hover.score / grid.maxScore).toFixed(3) : '0'} c={C.cyan} />
@@ -3497,10 +3601,12 @@ function OptimizerWorkspace() {
           icon={<Ruler size={14} color={C.blue} />}
           right={`λ ${designLambda.toFixed(2)}`}>
           <p className="ctr-p" style={{ fontSize: 11.5 }}>
-            The geometry every other tab renders and evaluates{outerLocked ? ', outer tube fully constrained' : ''}.
+            The geometry every other tab renders and evaluates
+            {mech.outerLocked ? ', outer tube fully constrained' : mech.planar ? ', outer tube held planar' : ''}.
             λ = C·L_c²·κ₁κ₂
             {' = '}<Cx id="lambda"><b style={{ color: designLambda > LAMBDA_CRIT ? C.gold : C.dim }}>{designLambda.toFixed(2)}</b></Cx>
-            {designLambda > LAMBDA_CRIT ? ' — past the fold, so it snaps.' : ' — below π²/4, so it cannot snap.'}
+            {mech.planar && <> · λ_eff = <Cx id="planarCrit">{designLamE.toFixed(2)}</Cx></>}
+            {designLamE > LAMBDA_CRIT ? ' — past the fold, so it snaps.' : ' — below π²/4, so it cannot snap.'}
           </p>
           {/* Typed, not slid: any value can be entered, so no slider range
               (and no separate ceiling for it) constrains the design. */}
@@ -3523,7 +3629,7 @@ function OptimizerWorkspace() {
 
         <Panel title="Tubes & constraint" open={panels.tubes} onToggle={() => togglePanel('tubes')}
           icon={<Boxes size={14} color={C.blue} />}
-          right={outerLocked ? 'outer locked' : 'outer free'}>
+          right={outerMode === 'rigid' ? 'outer locked' : outerMode === 'planar' ? 'outer planar' : 'outer free'}>
           {(() => {
             // Three linked fields per tube; any one can be edited and the
             // other two follow. Wall = (OD − ID)/2. Editing OD holds the wall.
@@ -3543,6 +3649,8 @@ function OptimizerWorkspace() {
             };
             const lamFree = mech.Cfree * (LcMm / 1000) ** 2 * k1 * k2;
             const lamLock = mech.Clocked * (LcMm / 1000) ** 2 * k1 * k2;
+            // Planar keeps the free λ; its snap test is λ_eff.
+            const lamPlan = lamEff(lamFree, mech.CmuPlanar * (LcMm / 1000) ** 2 * k2 * k2);
             const verdict = (lam, act, name, cid) => (
               <div className={act ? 'act' : ''}>
                 <div className="cap-label">{name}</div>
@@ -3574,12 +3682,15 @@ function OptimizerWorkspace() {
                   Reset to the original pair (1.02 / 0.82 mm, both)
                 </button>
 
-                <div className="cap-label" style={{ marginTop: 4 }}>Outer tube rotation</div>
+                <div className="cap-label" style={{ marginTop: 4 }}>Outer tube constraint</div>
                 <div className="ctr-seg">
-                  <button className={!outerLocked ? 'on' : ''} onClick={() => setOuterLocked(false)}>
+                  <button className={outerMode === 'clamped' ? 'on' : ''} onClick={() => setOuterMode('clamped')}>
                     Clamped at base
                   </button>
-                  <button className={outerLocked ? 'on' : ''} onClick={() => setOuterLocked(true)}>
+                  <button className={outerMode === 'planar' ? 'on' : ''} onClick={() => setOuterMode('planar')}>
+                    Planar
+                  </button>
+                  <button className={outerMode === 'rigid' ? 'on' : ''} onClick={() => setOuterMode('rigid')}>
                     Fully constrained
                   </button>
                 </div>
@@ -3587,19 +3698,29 @@ function OptimizerWorkspace() {
                   Clamped at base: the outer tube can twist and bend along its length, so the
                   overlap's shape changes as the fin turns. Fully constrained: the outer tube
                   is rigid — it holds its own precurved arc, the fin conforms to it, and only
-                  the fin beyond the sheath moves.
+                  the fin beyond the sheath moves. Planar: a guide keeps the outer tube in its
+                  own plane — it still bends within that plane and twists about its axis, but
+                  cannot curve out of it, so the fin is pulled toward the plane and the snap
+                  test becomes λ_eff.
                 </p>
-                <div className="ctr-verdict">
-                  {verdict(lamFree, !outerLocked, 'clamped at base', 'lambda')}
-                  {verdict(lamLock, outerLocked, 'fully constrained', 'rigid')}
+                <div className="ctr-verdict" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
+                  {verdict(lamFree, outerMode === 'clamped', 'clamped', 'lambda')}
+                  {verdict(lamPlan, outerMode === 'planar', 'planar · λ_eff', 'planarCrit')}
+                  {verdict(lamLock, outerMode === 'rigid', 'fully constr.', 'rigid')}
                 </div>
                 <p className="ctr-p" style={{ fontSize: 11.5 }}>
-                  Same λ in both modes, for any diameters: with both tubes Nitinol,
-                  k_b/k_t = 1+ν for every circular section, so λ = (1+ν)·L_c²·κ₁κ₂ whether
-                  the sheath is compliant or rigid. A rigid sheath stops the fin sharing its
-                  twist (less compliance) but also stops it bending the sheath (stronger
-                  coupling), and the two cancel. Whether it snaps is unchanged; the shape,
-                  strain and energy per snap are not.
+                  Same λ in clamped and fully constrained modes, for any diameters: with both
+                  tubes Nitinol, k_b/k_t = 1+ν for every circular section, so
+                  λ = (1+ν)·L_c²·κ₁κ₂ whether the sheath is compliant or rigid. A rigid sheath
+                  stops the fin sharing its twist (less compliance) but also stops it bending
+                  the sheath (stronger coupling), and the two cancel. Whether it snaps is
+                  unchanged; the shape, strain and energy per snap are not.
+                </p>
+                <p className="ctr-p" style={{ fontSize: 11.5 }}>
+                  Planar keeps that λ but adds ½μ sin²θ to the energy, μ = <Cx id="planarV">{(mech.CmuPlanar * (LcMm / 1000) ** 2 * k2 * k2).toFixed(2)}</Cx>:
+                  the guide's cost of holding the fin's out-of-plane curvature flat. It
+                  steadies the antialigned state and moves the fold, so snapping is judged
+                  by λ_eff = −min(λ cos θ + μ cos 2θ) against π²/4.
                 </p>
               </>
             );

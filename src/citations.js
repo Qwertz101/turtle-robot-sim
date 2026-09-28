@@ -167,6 +167,14 @@ export const EQUATIONS = [
     note: 'The optimiser sweeps one curvature for both tubes. The current design may set them separately.',
     shown: ['Design · surface x-axis'],
   },
+  {
+    id: 'planarCrit', sec: 'bif', title: 'Snap test with a planar outer tube', kind: 'derived',
+    tex: r`\lambda_{\text{eff}} = -\min_\theta\big(\lambda\cos\theta + \mu\cos 2\theta\big) > \frac{\pi^2}{4}`,
+    src: [['G16', 'p. 25, Eq. (19) operator; p. 26, comparison argument for the trivial branch']],
+    note: 'With the planar term the second-variation operator becomes Sh = −h″ + (λ cos θ + μ cos 2θ)h. Gilbert et al.’s comparison argument then guarantees stability while λ_eff ≤ π²/4, a sufficient condition that is exact when μ = 0 (λ_eff = λ). Closed form: λ − μ if λ ≥ 4μ, otherwise λ²/8μ + μ.',
+    uses: ['planarV', 'crit'],
+    shown: ['Sim · λ_eff card (planar)', 'Design · Tubes & constraint', 'Design · onset contour (planar)'],
+  },
 
   /* ── 3 · Reduced energy model ─────────────────────────────────── */
   {
@@ -221,6 +229,14 @@ export const EQUATIONS = [
     note: 'Numerical choices, six substeps per frame. The rules require seeding from the previous frame so hysteresis appears. A snap is flagged when the twist rate exceeds 4 rad/s.',
     uses: ['V'],
     shown: ['Sim · Twist rate', 'Sim · Tip twist θ', 'Sim · snap flash'],
+  },
+  {
+    id: 'planarV', sec: 'nrg', title: 'Planar outer tube: energy term', kind: 'derived',
+    tex: r`V = \tfrac12(\theta-\alpha)^2 - \lambda\cos\theta + \tfrac12\mu\sin^2\theta, \qquad \mu = L_c^2\,\kappa_2^2\,\frac{k_{2b}^2}{k_{1b}+k_{2b}}\,\frac{k_{1t}+k_{2t}}{k_{1t}k_{2t}}`,
+    src: [['G16', 'p. 22, Eq. (2) energy, minimised with K_y = 0']],
+    note: 'Holding the overlap in the outer tube’s plane leaves the fin’s out-of-plane precurvature κ₂ sin θ to be held flat by the guide instead of shared with the sheath. The extra bending energy, scaled like λ, is ½μ sin²θ. For identical tubes μ = (1+ν)L_c²κ₂², the same size as λ. It pulls the fin toward the plane and moves the fold. μ = 0 in the other modes.',
+    uses: ['V', 'stiff', 'planarK'],
+    shown: ['Sim · energy landscape, equilibrium map, V and V″ (planar)', 'Design · Tubes & constraint'],
   },
 
   /* ── 4 · Snap energy ──────────────────────────────────────────── */
@@ -286,6 +302,13 @@ export const EQUATIONS = [
     note: 'The limit of §5.1: a rigid sheath keeps its own arc and the fin conforms to it.',
     uses: ['curv'],
     shown: ['Design · fully constrained'],
+  },
+  {
+    id: 'planarK', sec: 'kin', title: 'Planar outer tube: the constraint', kind: 'assumed',
+    tex: r`K_y = 0 \ \text{on}\ s \in [0, L_c], \qquad K_x = w_1\kappa_1 + w_2\kappa_2\cos\theta`,
+    note: 'An idealised frictionless guide: the sheath may bend in its own plane and twist about its axis, but its centreline cannot leave that plane. λ, the torsional compliance and the energy scale stay the clamped ones. The fin beyond the sheath is not guided and still leaves the plane.',
+    uses: ['curv'],
+    shown: ['Sim · 3-D shape and guide plane (planar)'],
   },
 
   /* ── 6 · Propulsion efficiency ────────────────────────────────── */
