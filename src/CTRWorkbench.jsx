@@ -1194,7 +1194,7 @@ function useDesignStore() {
   // on a theme switch (key={`${tab}${ready}`}, so the canvases and WebGL
   // scenes repaint), and local state does not survive its component
   // unmounting — a theme toggle was silently switching every layer back off.
-  const [layers, setLayers] = useState({ tipTrack: false, midTrack: false, vectors: true, compass: false, headingUp: false });
+  const [layers, setLayers] = useState({ tipTrack: false, midTrack: false, vectors: false, compass: false, headingUp: false });
   // Tube cross-sections (mm) and the outer tube's rotational constraint.
   // Part of the SPECIFICATION, so owned here like every other configured
   // quantity; `mech` is derived once and read by every view.
