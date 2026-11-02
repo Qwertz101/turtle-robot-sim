@@ -11,4 +11,6 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   base: '/turtle-robot-sim/',
   plugins: [react(), tailwindcss()],
+  // The physics worker imports ES modules (physics.js → model.js → three).
+  worker: { format: 'es' },
 });

@@ -67,6 +67,49 @@ export const REFERENCES = [
     text: 'L. F. Coffin Jr., Trans. ASME 76 (1954); S. S. Manson, NACA TN-2933 (1953) — the Coffin–Manson strain-life law.',
     role: 'Functional form of the fatigue law only. The constants used here are not from these works.',
   },
+  {
+    key: 'MO50', n: 8, short: 'Morison et al. 1950',
+    text: 'J. R. Morison, M. P. O’Brien, J. W. Johnson, S. A. Schaaf, “The force exerted by surface waves on piles,” Petroleum Transactions AIME, vol. 189, pp. 149–154, 1950.',
+    role: 'The drag-plus-inertia force on a cylinder in a fluid, applied per segment to the normal velocity.',
+  },
+  {
+    key: 'BR82', n: 9, short: 'Brennen 1982',
+    text: 'C. E. Brennen, “A review of added mass and fluid inertial forces,” Report CR 82.010, Naval Civil Engineering Laboratory, Port Hueneme, 1982.',
+    url: 'https://authors.library.caltech.edu/records/6819e-vnh65',
+    role: 'Added mass of a body accelerating in a fluid; for a circular cylinder in potential flow, one displaced fluid mass per unit length.',
+  },
+  {
+    key: 'WM06', n: 10, short: 'White & Majdalani 2006',
+    text: 'F. M. White, J. Majdalani, Viscous Fluid Flow, 3rd ed., McGraw-Hill, 2006 — circular-cylinder drag fit, as reproduced and compared in H. A. Elghannay, Y. M. F. El Hasadi, Al-Mukhtar Journal of Engineering Research 7(1), pp. 20–28, 2023.',
+    role: 'C_D(Re) of a circular cylinder in cross-flow below the drag crisis (Re < 2.5·10⁵), built on Tritton’s and Wieselsberger’s data.',
+  },
+  {
+    key: 'GO17', n: 11, short: 'Gomez et al. 2017',
+    text: 'M. Gomez, D. E. Moulton, D. Vella, “Critical slowing down in purely elastic ‘snap-through’ instabilities,” Nature Physics, vol. 13, pp. 142–145, 2017.',
+    doi: '10.1038/nphys3915',
+    role: 'Snap-through near a fold is slow even without dissipation; inertial bottleneck time ∝ Δμ^(−1/4). Used to validate the solver.',
+  },
+  {
+    key: 'HS96', n: 12, short: 'Hosea & Shampine 1996',
+    text: 'M. E. Hosea, L. F. Shampine, “Analysis and implementation of TR-BDF2,” Applied Numerical Mathematics, vol. 20, pp. 21–37, 1996.',
+    role: 'The stiff integrator: TR-BDF2 as an L-stable DIRK 2(3) pair (§2) and its stiffness-corrected error estimate (§6).',
+  },
+  {
+    key: 'BA85', n: 13, short: 'Bank et al. 1985',
+    text: 'R. E. Bank, W. M. Coughran Jr., W. Fichtner, E. H. Grosse, D. J. Rose, R. K. Smith, “Transient simulation of silicon devices and circuits,” IEEE Trans. Computer-Aided Design, vol. 4, pp. 436–451, 1985.',
+    role: 'Origin of TR-BDF2.',
+  },
+  {
+    key: 'KKO', n: 14, short: 'Kokotović et al. 1986',
+    text: 'P. V. Kokotović, H. K. Khalil, J. O’Reilly, Singular Perturbation Methods in Control: Analysis and Design, Academic Press, 1986.',
+    role: 'Tikhonov-type reduction: a fast variable (here the twist) stays on its quasi-static manifold except where that manifold folds.',
+  },
+  {
+    key: 'NI', n: 15, short: 'Nitinol data (ASTM F2063)',
+    text: 'Nitinol (NiTi, ASTM F2063) density 6.45 g/cm³, as published in supplier data sheets (e.g. Johnson Matthey, “Comparison of properties of Nitinol and stainless steel”).',
+    url: 'https://matthey.com/products-and-services/medical-components/resource-library/comparison-of-properties-of-nitinol-and-stainless-steel',
+    role: 'Mass of the tube walls.',
+  },
 ];
 export const REF_BY_KEY = Object.fromEntries(REFERENCES.map((r) => [r.key, r]));
 
@@ -79,6 +122,7 @@ export const SECTIONS = [
   { id: 'prop', title: 'Propulsion efficiency' },
   { id: 'fat', title: 'Strain and fatigue' },
   { id: 'opt', title: 'Optimiser score' },
+  { id: 'dyn', title: 'Dynamics (physics solver)' },
 ];
 
 const r = String.raw;
@@ -223,11 +267,11 @@ export const EQUATIONS = [
     uses: ['fold'],
   },
   {
-    id: 'integ', sec: 'nrg', title: 'Real-time integrator', kind: 'assumed',
-    tex: r`\begin{gathered} v_{k+1} = 0.85\,v_k - 0.02\,V'(\theta_k), \quad |v| \le 0.25 \\ \theta_{k+1} = \theta_k + v_{k+1} \end{gathered}`,
+    id: 'integ', sec: 'nrg', title: 'Simulator motion source', kind: 'derived',
+    tex: r`\begin{gathered} \text{sweep: } (\alpha, \theta, \text{shape})(t) = \text{averaged physics cycle (§9)} \\ \text{motor stopped: } V'(\theta;\alpha) = 0 \text{ on the current branch} \end{gathered}`,
     src: [['R', 'Part 4']],
-    note: 'Numerical choices, six substeps per frame. The rules require seeding from the previous frame so hysteresis appears. A snap is flagged when the twist rate exceeds 4 rad/s.',
-    uses: ['V'],
+    note: 'Solve first, then display: when sweeping, the 3-D view plays back the time-domain physics solution for the current design (nothing moves until it is solved). With the motor stopped, the fin is shown at its static equilibrium, continued from the previous twist so hysteresis is kept. A snap is flagged when the physical twist rate exceeds 4 rad/s. (An earlier heavy-ball “solver” with arbitrary step and speed cap is no longer used for motion.)',
+    uses: ['V', 'dynEOM'],
     shown: ['Sim · Twist rate', 'Sim · Tip twist θ', 'Sim · snap flash'],
   },
   {
@@ -492,6 +536,90 @@ export const EQUATIONS = [
     note: 'Display thresholds, with life classes high-cycle above 10⁵ and low-cycle above 10³. Labels only; nothing is computed from them.',
     uses: ['score', 'life'],
     shown: ['Design · tooltip', 'Design · Safety check'],
+  },
+  /* ── 9 · Dynamics ─────────────────────────────────────────────── */
+  {
+    id: 'dynScale', sec: 'dyn', title: 'True strain energy', kind: 'derived',
+    tex: r`U = \frac{k_{\text{eff}}}{L_c}\,V(\theta,\alpha) + \tfrac12\!\sum_{\text{seg}} k_B\,\Delta s\,\lvert u - u_{\text{eq}}(\theta,\alpha)\rvert^2,\qquad k_{\text{eff}} = \Big(\frac{1}{k_{1t}} + \frac{1}{k_{2t}}\Big)^{-1}`,
+    src: [['G16', 'Eq. (2) p. 22, Eq. (16) p. 25']],
+    vars: [
+      [r`k_{\text{eff}}`, 'Torsional stiffness of the relative twist: the tubes carry it in series (k2t alone with a rigid sheath)'],
+      [r`V`, 'The reduced energy of §3, exactly as the rest of the app uses it'],
+      [r`u,\ u_{\text{eq}}`, 'Centreline curvature (state) and its equilibrium value, the stiffness-weighted mean of the tubes’ precurvatures'],
+      [r`k_B`, 'k1b + k2b on the overlap, k2b on the extension'],
+    ],
+    note: 'Kirchhoff rod energy with its ½. The bending part is split by completing the square: Σ½k_ib|u − κ_i e_i|² = ½(Σk_ib)|u − ū|² + terms in θ only, so at rest (u = u_eq) U is exactly the reduced model scaled to joules. Gilbert et al. write Eq. (2) without the ½; that is harmless for equilibria, but makes the app’s display energy scale k_t/L_c twice the physical value. The solver uses the physical one; displayed E_snap values elsewhere keep the app’s convention.',
+    uses: ['V', 'lambda'],
+    shown: ['Physics solver (all dynamics)'],
+  },
+  {
+    id: 'dynMass', sec: 'dyn', title: 'Kinetic energy and added mass', kind: 'adopted',
+    tex: r`T = \tfrac12 \sum_{\text{seg}} \big( m\,\lvert v\rvert^2 + m_a\,\lvert P_n v\rvert^2 \big),\quad m_a = C_a\,\rho_f\,\tfrac{\pi}{4}D^2\,\Delta s,\quad P_n = I - t t^{\mathsf T}`,
+    src: [['BR82', 'added mass of a circular cylinder, C_a = 1'], ['NI', 'density']],
+    vars: [
+      [r`m`, 'Nitinol walls (6450 kg/m³) plus the fluid carried inside the tubes, per segment'],
+      [r`m_a`, 'Added mass: fluid the segment drags along when it moves sideways'],
+      [r`P_n`, 'Projection onto the plane normal to the segment tangent t'],
+      [r`C_a`, 'Added-mass coefficient, 1 for a circular cylinder in potential flow'],
+    ],
+    note: 'Added mass acts on the normal velocity only (slender-body approximation). Spin inertia of the tubes about their own axes is not used: torsion is ~500× faster than bending here (see the twist entry).',
+    uses: [],
+    shown: ['Physics solver'],
+  },
+  {
+    id: 'dynDrag', sec: 'dyn', title: 'Fluid drag per segment', kind: 'adopted',
+    tex: r`\begin{gathered} f = -\tfrac12\,\rho_f\,C_D(\mathrm{Re})\,D\,\Delta s\,\lvert v_n\rvert\,v_n,\qquad \mathrm{Re} = \frac{\rho_f \lvert v_n\rvert D}{\mu_f} \\ C_D = 1 + 10\,\mathrm{Re}^{-2/3} \end{gathered}`,
+    src: [['MO50', 'drag term'], ['WM06', 'cylinder fit, valid below the drag crisis']],
+    vars: [
+      [r`v_n`, 'Segment velocity normal to its axis (independence principle: only the cross-flow component counts)'],
+      [r`\rho_f,\ \mu_f`, 'Water 998.2 kg/m³, 1.002 mPa·s; air 1.204 kg/m³, 18.13 µPa·s (20 °C)'],
+      [r`D`, 'Outer diameter: the sheath on the overlap, the fin on the extension'],
+    ],
+    note: 'Quasi-steady drag: the coefficient is the steady-flow value at the instantaneous Reynolds number. Tangential skin friction, wake memory and interaction between segments are not modelled.',
+    uses: [],
+    shown: ['Physics solver', 'Medium mode (water / air)'],
+  },
+  {
+    id: 'dynTwist', sec: 'dyn', title: 'Quasi-static twist and the twist snap', kind: 'derived',
+    tex: r`\begin{gathered} \theta(t) = \text{local min of } U(\theta;\,q,\alpha) \text{ in the current basin} \\ \partial^2_\theta U \to 0 \;\Rightarrow\; \text{jump to the next basin},\quad W_{\text{jump}} = U(\theta^-) - U(\theta^+) \end{gathered}`,
+    src: [['KKO', 'singular perturbation (Tikhonov) reduction'], ['R', 'Part 4: seed from the previous state']],
+    note: 'Torsional waves in Nitinol run at √(G/ρ) ≈ 1.7 km/s; the twist mode of the overlap is ~5·10⁴ rad/s against ~10² rad/s for bending, so the twist sits at its minimum for the current shape. Where that minimum disappears the twist snaps on the torsional time scale, effectively instantly; the energy it sheds rings out as torsional vibration and is booked as a loss, W_jump. The basin is continued from the last accepted step, so the hysteresis survives.',
+    uses: ['dynScale'],
+    shown: ['Physics solver', 'Logs · energy per cycle'],
+  },
+  {
+    id: 'dynLoss', sec: 'dyn', title: 'Material loss', kind: 'assumed',
+    tex: r`Q_m = -\beta\,k_B\,\Delta s\,\dot u,\qquad \beta = \frac{\eta}{\omega_1}`,
+    vars: [
+      [r`\eta`, 'Loss factor of the Nitinol (default 0.01; austenite’s intrinsic damping is very low, superelastic hysteresis is not modelled)'],
+      [r`\omega_1`, 'First bending mode of the fin at rest, so the damping ratio there is η/2'],
+    ],
+    note: 'Kelvin–Voigt damping on the bending strain rate. Higher modes are damped more (stiffness-proportional). Inter-tube friction is not modelled.',
+    uses: ['dynScale'],
+    shown: ['Physics panel (loss factor)'],
+  },
+  {
+    id: 'dynEOM', sec: 'dyn', title: 'Equations of motion', kind: 'derived',
+    tex: r`\begin{gathered} M(q)\,\ddot q = Q_e + Q_d + Q_m - \sum_{\text{seg}} \Big[ J^{\mathsf T} M_s\, c + J^{\mathsf T} \dot M_s\, v - \tfrac12\, v^{\mathsf T} \partial_q M_s\, v \Big] \\ v = J\dot q,\quad c = \dot J\,\dot q,\quad Q_e = -\partial_q U,\quad \alpha(t) = \Omega t \end{gathered}`,
+    src: [['G16', 'Eqs. (3)–(4) p. 23: Bishop-frame centreline']],
+    vars: [
+      [r`q`, 'Centreline curvature at nodes (6 on the overlap, 3 on the extension, two components each), piecewise linear in arc length'],
+      [r`J`, 'Exact Jacobian ∂p/∂q of the Bishop-frame march (SO(3) right Jacobian per segment)'],
+      [r`M_s`, 'Segment mass tensor m I + m_a P_n'],
+      [r`Q_d`, 'Drag (§9.3) mapped by Jᵀ'],
+      [r`\Omega`, 'Motor speed (stiff motor, prescribed)'],
+    ],
+    note: 'Lagrange’s equations with the twist adiabatic. Written this way, T + U is conserved exactly when drag, loss and the motor are off. Checks: straight-tube cantilever modes within 1.7–3% of Euler–Bernoulli; motor work = drag + loss + twist-snap + Δ(T+U) to within 10⁻⁵ per cycle (the motor torque comes from the separate α equation); snap escape time near the fold ∝ δ^(−1/4) as Gomez et al. find; J and dissipation converge to ~10% and ~3% under mesh refinement.',
+    uses: ['dynScale', 'dynMass', 'dynDrag', 'dynTwist', 'dynLoss', 'curv'],
+    shown: ['3-D sim (sweep playback)', 'Logs', 'Rowing objective'],
+  },
+  {
+    id: 'dynInt', sec: 'dyn', title: 'Time integration and cycles', kind: 'adopted',
+    tex: r`\begin{gathered} \text{TR-BDF2: }\ \gamma = 2-\sqrt2,\ d = \gamma/2,\ w = \sqrt2/4,\quad \text{Est} = (I - h d J)^{-1}\,\text{est} \\ \text{cycle } n:\ \alpha \in [\alpha_{\text{snap}} - 20^\circ + 2\pi n,\ \alpha_{\text{snap}} - 20^\circ + 2\pi(n+1)) \end{gathered}`,
+    src: [['HS96', '§2 tableau, §6 error estimate'], ['BA85', 'method']],
+    note: 'The nodal bending model is stiff (highest discrete modes ~10⁵ rad/s), so an L-stable implicit method is used, with a simplified Newton iteration and a reused Jacobian. A step that crosses a twist snap is taken at ≤ 2 µs. Runs start from rest; the wind-up to the first fold is discarded; each cycle is one motor turn starting 20° before the fold, so it holds exactly one snap and two snaps can never share a cycle.',
+    uses: ['dynEOM', 'fold'],
+    shown: ['3-D sim', 'Logs', 'Rowing objective'],
   },
 ];
 
