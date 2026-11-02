@@ -5,7 +5,7 @@ import {
   Play, Pause, RotateCcw, Zap, Activity, Sliders, Gauge, AlertTriangle,
   Boxes, Target, ArrowUpRight, ShieldAlert, Waves,
   Layers, ChevronDown, ChevronLeft, ChevronRight, Ruler,
-  CircleDot, Waypoints, MoveUpRight, Compass, Keyboard, BookOpen,
+  CircleDot, Waypoints, MoveUpRight, Compass, BookOpen, Anchor, RectangleVertical, Lock, Sun, Moon, SlidersHorizontal, RotateCw, MoveRight, ScrollText, Download, Box, MoveHorizontal,
 } from 'lucide-react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
@@ -74,7 +74,21 @@ const CSS = `
   border-color:var(--surface);color:var(--rams-700);}
 
 .ctr-body{flex:1;display:flex;min-height:0;}
+.ctr-logs{flex:1;overflow:auto;min-height:0;}
+.ctr-logs-in{max-width:880px;margin:0 auto;padding:22px 16px 40px;}
+.ctr-logs h2{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:16px;letter-spacing:.04em;text-transform:uppercase;}
+.ctr-logs-design{margin:12px 0;padding:8px 10px;border:1px solid var(--line-300);border-radius:6px;font-size:11.5px;}
+.ctr-logs-cfg{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px 14px;margin-bottom:8px;}
+.ctr-logs-cfg label{display:grid;grid-template-columns:1fr;gap:3px;font-size:11px;}
+.ctr-logs-cfg label>span{text-transform:uppercase;letter-spacing:.06em;color:var(--ink-600);}
+.ctr-logs-cfg label{position:relative;}
+.ctr-logs-cfg label>i{position:absolute;right:8px;bottom:6px;font-style:normal;font-size:10.5px;color:var(--ink-600);pointer-events:none;}
+.ctr-logs-res{margin-top:16px;}
+.ctr-logs-stats{display:flex;flex-direction:column;gap:2px;font-size:11.5px;margin-bottom:10px;}
+.ctr-logs-warn{margin-bottom:8px;padding:6px 9px;border:1px solid var(--rams-500);border-radius:6px;font-size:12px;}
+.ctr-logplot{margin-top:10px;}
 .ctr-view{position:relative;flex:1;min-width:0;background:var(--paper-50);}
+.ctr-oned{position:absolute;inset:0;width:100%;height:100%;z-index:5;background:var(--paper-50);}
 .ctr-view canvas{display:block;position:absolute;inset:0;width:100%;height:100%;}
 .ctr-side{width:372px;flex-shrink:0;border-left:1px solid var(--line-300);
   background:var(--surface);display:flex;flex-direction:column;min-height:0;}
@@ -598,6 +612,13 @@ function tipPoint(alpha, thetaTip, k1, k2, Lc, Lext, w1, w2, out, wy = w2) {
     pz += (r20 * sx + r21 * sy + r22 * sz) * de;
   }
   out[0] = px * M2MM; out[1] = py * M2MM; out[2] = pz * M2MM;
+  // Optional roll vector (unit): the fin's material direction at the tip,
+  // R_end·(cos θ, sin θ, 0). The extension turns the frame about exactly
+  // that direction, so it is unchanged along it (same as tipRoll's).
+  if (out.length >= 6) {
+    const c = Math.cos(thetaTip), sn = Math.sin(thetaTip);
+    out[3] = r00 * c + r01 * sn; out[4] = r10 * c + r11 * sn; out[5] = r20 * c + r21 * sn;
+  }
   return out;
 }
 
@@ -780,6 +801,86 @@ const EPS_SUPERELASTIC = 0.08;   // MONOTONIC limit — never a cyclic safety ga
 const epsAllowFor = (N) => Math.pow(10 / N, 1 / 5);
 const LAMBDA_CRIT = Math.PI ** 2 / 4;      // 2.467, beta_sigma = 0 only
 
+/* The live animation's twist solver, shared with the Logs tab so the logged
+   cycles are the SAME discrete dynamics the 3-D view shows. Heavy-ball
+   descent on V: v ← MOM·v − LR·∂V/∂θ, |v| ≤ VMAX, SUB substeps per frame,
+   with α held fixed within a frame and advanced by SWEEP_RATE·dt. */
+/** Small seeded PRNG for the frame-time jitter (reproducible runs). */
+function mulberry32(a) {
+  return () => {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const SOLVER = { LR: 0.02, MOM: 0.85, SUB: 6, VMAX: 0.25, SWEEP_RATE: 1.1, DT_MAX: 0.05 };
+
+/** The fin's roll at the tip: its material (κ₂) direction, θ from the
+ *  sheath frame carried along the free extension. Angle about the tip axis
+ *  from FORWARD (robot-local +x) projected normal to that axis, right-handed
+ *  about the tangent; null when the tip points along FORWARD. Robot-local
+ *  axes are (x, y, z) = (forward, up, outward). */
+/** Rowing integral of one steady revolution, for a design:
+ *    J = ∮ (r̂ · v)² dx_fwd = Σ (r̂·Δp/Δt)² · Δx_fwd
+ *  r̂ = unit roll vector at the tip, v = tip velocity, x_fwd = the tip's
+ *  forward (robot-local +x) coordinate; SI units, m³/s². Inspired by drag,
+ *  F_D = ½ρC_D A v²: (r̂·v)² is the blade-normal speed squared, so
+ *  ½ρC_D A·J is the drag work along FORWARD per revolution, in joules.
+ *  ρ, C_D and A are left out: they do not depend on κ or L_c, so they do
+ *  not change the ranking. Squared, so the blade is symmetric (r̂ and −r̂
+ *  score the same). Runs the live view's solver (SOLVER) at a fixed 60
+ *  fps, no jitter: one revolution of warm-up from rest, then one measured. */
+const ROW_FPS = 60;
+function rowingIntegral(lambda, mu, k1, k2, Lc, Lext, mech, revs = 1, jitter = 0, seed = 1) {
+  // Averaged over `revs` consecutive revolutions after the warm-up, each
+  // frame's duration drawn around 1/ROW_FPS with relative sd `jitter`, as in
+  // the Logs tab: frame timing is what makes single revolutions differ.
+  const { LR, MOM, SUB, VMAX, SWEEP_RATE, DT_MAX } = SOLVER;
+  const TWO = 2 * Math.PI, aEnd = TWO * (1 + revs);
+  const rnd = mulberry32(seed);
+  const gauss = () => Math.sqrt(-2 * Math.log(1 - rnd())) * Math.cos(2 * Math.PI * rnd());
+  const out = [0, 0, 0, 0, 0, 0];
+  const perRev = new Float64Array(revs);
+  let a = 0, th = 0, v = 0, Jabs = 0, prev = null;
+  while (a < aEnd) {
+    const dt = jitter > 0
+      ? Math.min(DT_MAX, Math.max(0.2 / ROW_FPS, (1 / ROW_FPS) * (1 + jitter * gauss())))
+      : 1 / ROW_FPS;
+    a += dt * SWEEP_RATE;
+    for (let i = 0; i < SUB; i++) {
+      v = Math.max(-VMAX, Math.min(VMAX, MOM * v - LR * gradient(th, a, lambda, mu)));
+      th += v;
+    }
+    if (a < TWO) continue;
+    tipPoint(a, th, k1, k2, Lc, Lext, mech.w1, mech.w2, out, mech.wy);
+    if (prev) {
+      const dx = (out[0] - prev[0]) / M2MM, dy = (out[1] - prev[1]) / M2MM, dz = (out[2] - prev[2]) / M2MM;
+      const f = (prev[3] * dx + prev[4] * dy + prev[5] * dz) / dt;     // r̂·v, m/s
+      perRev[Math.min(revs - 1, Math.floor(a / TWO) - 1)] += f * f * dx; Jabs += Math.abs(f * f * dx);
+    }
+    prev = out.slice();
+  }
+  let m = 0, m2 = 0;
+  for (const x of perRev) { m += x / revs; m2 += (x * x) / revs; }
+  return { J: m, Jabs: Jabs / revs, sd: Math.sqrt(Math.max(0, m2 - m * m)) };
+}
+
+function tipRoll(Rtip, th) {
+  const c = Math.cos(th), sn = Math.sin(th);
+  const t = [Rtip[0][2], Rtip[1][2], Rtip[2][2]];
+  const d = [0, 1, 2].map((i) => Rtip[i][0] * c + Rtip[i][1] * sn);
+  const dn = Math.hypot(d[0], d[1], d[2]); d[0] /= dn; d[1] /= dn; d[2] /= dn;
+  const f = [1 - t[0] * t[0], -t[0] * t[1], -t[0] * t[2]];
+  const fn = Math.hypot(f[0], f[1], f[2]);
+  if (fn < 1e-6) return { dir: d, tan: t, deg: null };
+  f[0] /= fn; f[1] /= fn; f[2] /= fn;
+  const cr = [f[1] * d[2] - f[2] * d[1], f[2] * d[0] - f[0] * d[2], f[0] * d[1] - f[1] * d[0]];
+  const deg = (Math.atan2(cr[0] * t[0] + cr[1] * t[1] + cr[2] * t[2], f[0] * d[0] + f[1] * d[1] + f[2] * d[2]) * 180) / Math.PI;
+  return { dir: d, tan: t, deg };
+}
+
 /** Actuator work per revolution: ∮|τ dα|, τ = −λ sin θ, dα = (1+λcos θ)dθ.
  *  With the planar term, τ = −(λ sin θ + μ sin θ cos θ) and dα = V″ dθ. */
 function motorWork(lambda, mu = 0) {
@@ -892,16 +993,28 @@ const DEFAULT_TUBES = { outer: { od: 1.02, id: 0.82 }, inner: { od: 1.02, id: 0.
  *  cannot snap: with nothing to twist against there is no competing curvature
  *  to store energy. The design sweep varies a single κ, i.e. this expression
  *  on the diagonal κ₁ = κ₂ = κ (Part 2 rule: stated explicitly). */
+/** Torsional efficiency of one snap: the share of the released energy that
+ *  comes out of the twist ½(θ−α)², i.e. what a torsional-spring reservoir
+ *  (the fin twisting a separate output shaft) can deliver. The rest is the
+ *  bending coupling (and, planar, the guide term). Fold at fixed α_snap. */
+function torsionEfficiency(lambda, mu, fold = foldSnap(lambda, mu)) {
+  if (!fold) return null;
+  const { thetaPeak: p, thetaStable: q, alphaSnap: a } = fold;
+  const E = energy(p, a, lambda, mu) - energy(q, a, lambda, mu);
+  const T = 0.5 * (p - a) ** 2 - 0.5 * (q - a) ** 2;
+  return E > 0 ? { eta: Math.max(0, Math.min(1, T / E)), T, E, B: E - T } : null;
+}
+
 const bifurcation = (k1, k2, Lc, mech) => mech.C * Lc * Lc * k1 * k2;
 
-function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech, Lext = 0) {
+function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech, Lext = 0, objective = 'translation', rowPre = null) {
   const lambda = mech.C * Lc * Lc * kappa * kappa;     // κ₁ = κ₂ = κ (sweep diagonal)
   // Bending strain per tube, ε = κ·d_o/2 on each tube's OWN diameter (Part 6:
   // never mix diameters); the larger governs.
   const eb = kappa * (mech.outerLocked ? mech.t2.r : mech.rMax);
   const base = {
     kappa, Lc, lambda, eb, gamma: 0, eeq: eb, dE: 0, dE_J: 0, Win: 0, eta: 0,
-    etaP: 0, prod_J: 0,
+    etaP: 0, etaT: 0, etaO: 0, prod_J: 0, rowJ: 0, rowAbs: 0, rowSd: 0,
     score: 0, thetaPeak: 0, thetaStable: 0, stored_J: 0, N: fatigueLife(eb), regime: 'stable',
   };
   const mu = muOf(mech, Lc, kappa);                    // 0 unless planar
@@ -915,6 +1028,16 @@ function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech, Lext = 0) {
   // Snap propulsion efficiency: the share of the snap's arc that pushes along
   // its own net direction. It depends on the tip's path, so on L_ext too.
   const etaP = Math.max(0, snapEfficiency(lambda, kappa, kappa, Lc, Lext, mech, fold)?.eta ?? 0);
+  // Torsional efficiency: share of ΔE released as twist (torsional-spring
+  // reservoir driving a separate propulsor). The objective picks which one
+  // the score and the surface height use.
+  const etaT = torsionEfficiency(lambda, mu, fold)?.eta ?? 0;
+  const etaO = objective === 'torsion' ? etaT : etaP;
+  // Rowing objective: the stroke integral. The optimiser precomputes it
+  // (averaged over many revolutions, asynchronously) and passes it in;
+  // without that, one unjittered revolution.
+  const row = objective === 'rowing'
+    ? (rowPre ?? rowingIntegral(lambda, mu, kappa, kappa, Lc, Lext, mech)) : null;
   // Torsional strain per tube (Part 6 engineering estimate): the snap's angle
   // jump spread over L_c, times that tube's own radius. As in the rules, a
   // free tube is charged the FULL jump (a conservative bound -- in series
@@ -938,13 +1061,19 @@ function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech, Lext = 0) {
   // is only meaningful against the dimensionless ΔE.
   // Productive energy: only the share of the snap that pushes forward
   // counts, in both the saturation term and the energy-per-work ratio.
-  const dEp = etaP * dE;
+  const dEp = etaO * dE;
   const eta = 1 - Math.exp(-etaK * dEp);
   const gate = Math.exp(-Math.pow(eeq / strainLimit, 4));
   return {
     kappa, Lc, lambda, mu, lamEff: base.lamEff, eb, gamma, eeq, dE, dE_J: dE * scale, Win, eta, gate,
-    etaP, prod_J: dE * scale * etaP,           // productive snap energy, J
-    score: Win > 1e-9 ? eta * (dEp / Win) * gate : 0,
+    etaP, etaT, etaO,
+    // Surface height: productive snap energy in J, or for the rowing
+    // objective J_row/1000 so the plot's ×1000 shows J_row in m³/s².
+    prod_J: row ? row.J / 1000 : dE * scale * etaO,
+    rowJ: row ? row.J : 0, rowAbs: row ? row.Jabs : 0, rowSd: row?.sd ?? 0,
+    // Symmetric blade, so the stroke's direction along forward is a
+    // convention too: score the magnitude.
+    score: row ? Math.abs(row.J) * gate : Win > 1e-9 ? eta * (dEp / Win) * gate : 0,
     thetaPeak, thetaStable, alphaSnap,
     stored_J: 0.5 * (thetaPeak - alphaSnap) ** 2 * scale,
     N: fatigueLife(eeq),
@@ -952,13 +1081,14 @@ function evaluateDesign(kappa, Lc, strainLimit, etaK = 0.05, mech, Lext = 0) {
   };
 }
 
-function buildGrid({ nx, ny, kappaMin = 0, kappaMax, LcMin, LcMax, strainLimit, etaK, mech, Lext }) {
+function buildGrid({ nx, ny, kappaMin = 0, kappaMax, LcMin, LcMax, strainLimit, etaK, mech, Lext, objective, rowData = null }) {
   const cells = [];
   let best = null, maxDE = 0, maxMJ = 0, maxProd = 0, maxScore = 0;
   for (let j = 0; j < ny; j++) {
     const Lc = LcMin + ((LcMax - LcMin) * j) / (ny - 1);
     for (let i = 0; i < nx; i++) {
-      const d = evaluateDesign(kappaMin + ((kappaMax - kappaMin) * i) / (nx - 1), Lc, strainLimit, etaK, mech, Lext);
+      const d = evaluateDesign(kappaMin + ((kappaMax - kappaMin) * i) / (nx - 1), Lc, strainLimit, etaK, mech, Lext, objective,
+        rowData ? { J: rowData[3 * (j * nx + i)], Jabs: rowData[3 * (j * nx + i) + 1], sd: rowData[3 * (j * nx + i) + 2] } : null);
       cells.push(d);
       if (d.dE > maxDE) maxDE = d.dE;
       if (d.dE_J > maxMJ) maxMJ = d.dE_J;
@@ -1186,7 +1316,7 @@ function useDesignStore() {
   // so there is no separate slider ceiling to keep in step. z is in mJ;
   // zAuto spans 0 to the tallest cell.
   const [domain, setDomain] = useState({
-    logLife: 10, etaK: 0.05, clip: true,
+    logLife: 10, etaK: 0.05, clip: true, rowRevs: 10, rowJitter: 10,
     kMin: 0, kMax: 25, LcMinMm: 10, LcMaxMm: 150, zAuto: true, zMin: 0, zMax: 300,
   });
   // Data-layer visibility on the 3-D view. This belongs in the shared store,
@@ -1194,7 +1324,7 @@ function useDesignStore() {
   // on a theme switch (key={`${tab}${ready}`}, so the canvases and WebGL
   // scenes repaint), and local state does not survive its component
   // unmounting — a theme toggle was silently switching every layer back off.
-  const [layers, setLayers] = useState({ tipTrack: false, midTrack: false, vectors: false, compass: false, headingUp: false });
+  const [layers, setLayers] = useState({ tipTrack: false, midTrack: false, vectors: false, tipVectors: false, compass: false, headingUp: false, effCard: true });
   // Tube cross-sections (mm) and the outer tube's rotational constraint.
   // Part of the SPECIFICATION, so owned here like every other configured
   // quantity; `mech` is derived once and read by every view.
@@ -1205,6 +1335,12 @@ function useDesignStore() {
   const [outerPlanar, setOuterPlanar] = useState(false);
   const mech = useMemo(() => pairMechanics(tubes, outerLocked, outerPlanar), [tubes, outerLocked, outerPlanar]);
   const [handoff, setHandoff] = useState(null);
+  // What counts as useful snap output: 'translation' (the tip's net push,
+  // η_prop) or 'torsion' (the twist released, η_T, for a fin used as a
+  // torsional spring that powers a separate propulsor).
+  const [objective, setObjective] = useState('translation');
+  // Simulator view: the 3-D scene, or the 1-D forward-axis view.
+  const [simView, setSimView] = useState('3d');
 
   const patchSim = useCallback((p) => setSim((s) => ({ ...s, ...p })), []);
   const patchTube = useCallback((which, p) =>
@@ -1221,7 +1357,7 @@ function useDesignStore() {
 
   return { sim, patchSim,
     domain, patchDomain, layers, patchLayers, handoff, applyDesign,
-    tubes, patchTube, setTubes, outerLocked, setOuterLocked, outerPlanar, setOuterPlanar, mech };
+    tubes, patchTube, setTubes, outerLocked, setOuterLocked, outerPlanar, setOuterPlanar, mech, objective, setObjective, simView, setSimView };
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1400,8 +1536,191 @@ function usePanels(initial) {
 /* ═══════════════════════════════════════════════════════════════
    7 · WORKSPACE A — INTERACTIVE 3D SIMULATOR
    ═══════════════════════════════════════════════════════════════ */
+/* ── 1-D view ─────────────────────────────────────────────────────────────
+   Everything projected onto the FORWARD axis (robot-local +x): where the
+   tip is along it, the forward component of the tip's velocity (the travel
+   vector), and the forward component of the unit roll vector (cos of the
+   roll vector's angle to forward, −1 to 1). Above: the axis with the live
+   values as arrows. Below: their last ONE_D_SPAN seconds, red where the
+   fin is snapping. Fed per frame by the simulator loop; drawn on its own
+   canvas over the 3-D view, which keeps running underneath.             */
+const ONE_D_SPAN = 8;
+function OneDView({ feed }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const cv = ref.current, g = cv.getContext('2d');
+    let raf;
+    const draw = () => {
+      raf = requestAnimationFrame(draw);
+      const dpr = window.devicePixelRatio || 1;
+      const W = cv.clientWidth, H = cv.clientHeight;
+      if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+        cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+      }
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, W, H);
+      const o = feed.current, cur = o.cur;
+      if (!cur) return;
+      const mono = '11px "Fira Code", ui-monospace, monospace';
+      // Keep clear of the top-left cards: beside them on a wide view,
+      // below them on a narrow one.
+      const tl = cv.parentElement?.querySelector('.ctr-tl');
+      const tlR = tl ? tl.getBoundingClientRect() : null, cvR = cv.getBoundingClientRect();
+      const tlRight = tlR ? tlR.right - cvR.left : 0, tlBottom = tlR ? tlR.bottom - cvR.top : 0;
+      const beside = W - tlRight > 460;
+      const L = beside ? tlRight + 40 : 24, R = W - 28, mid = (L + R) / 2;
+      const reach = Math.max(10, cur.reach);
+      const X = (mm) => mid + ((R - L) / 2) * (mm / reach);
+      const arrow = (x0, y, x1, col, w) => {
+        g.strokeStyle = col; g.fillStyle = col; g.lineWidth = w;
+        g.beginPath(); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke();
+        if (Math.abs(x1 - x0) > 4) {
+          const s = Math.sign(x1 - x0);
+          g.beginPath(); g.moveTo(x1 + s * 2, y); g.lineTo(x1 - s * 9, y - 5); g.lineTo(x1 - s * 9, y + 5); g.fill();
+        }
+      };
+
+      // ── Axis with live arrows ──
+      const yA = beside ? Math.max(118, H * 0.24) : Math.max(118, tlBottom + 56);
+      g.strokeStyle = C.dim; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(L, yA); g.lineTo(R, yA); g.stroke();
+      g.font = mono; g.fillStyle = C.dim; g.textAlign = 'center';
+      const step = reach > 150 ? 50 : reach > 60 ? 20 : 10;
+      for (let mm = -Math.floor(reach / step) * step; mm <= reach; mm += step) {
+        g.beginPath(); g.moveTo(X(mm), yA - 4); g.lineTo(X(mm), yA + 4); g.stroke();
+        g.fillText(`${mm}`, X(mm), yA + 17);
+      }
+      g.textAlign = 'left'; g.fillText('← BACK', L, yA - 12);
+      g.textAlign = 'right'; g.fillText('FORWARD →  mm', R, yA - 12);
+      g.textAlign = 'center'; g.fillText('base', X(0), yA + 30);
+
+      const xt = X(cur.x);
+      // Travel: forward velocity, log-scaled so snaps stay on screen.
+      const vLen = Math.sign(cur.v) * Math.min(160, 34 * Math.log10(1 + Math.abs(cur.v)));
+      arrow(xt, yA - 34, xt + vLen, C.gold, 2.5);
+      // Roll: forward component of the unit roll vector, ±70 px at ±1.
+      /* Roll as a compass needle through the tip: the blade normal drawn in
+         the (forward, rest) plane, its forward component r_f horizontal and
+         the remaining √(1 − r_f²) vertical. Symmetric blade, so the needle
+         is double-ended. Behind it, the wake: the area the needle swept
+         between frames, i.e. the water its face pushed, filled gold where
+         the tip moved forward and blue where it moved back, fading out over
+         WAKE_S seconds. */
+      const NEEDLE = 46, WAKE_S = 1.6;
+      const nv = (q) => [q.r, -Math.sqrt(Math.max(0, 1 - q.r * q.r))];
+      for (let i = 1; i < o.hist.length; i++) {
+        const a = o.hist[i - 1], b = o.hist[i], age = cur.t - b.t;
+        if (age > WAKE_S) continue;
+        const xa = X(a.x), xb = X(b.x);
+        if (Math.abs(xb - xa) < 0.05 && Math.abs(b.r - a.r) < 1e-4) continue;
+        const [ua, va] = nv(a), [ub, vb] = nv(b);
+        g.globalAlpha = 0.42 * (1 - age / WAKE_S) ** 1.5;
+        g.fillStyle = b.x >= a.x ? C.gold : C.blue;
+        for (const sgn of [1, -1]) {
+          g.beginPath();
+          g.moveTo(xa, yA); g.lineTo(xa + sgn * NEEDLE * ua, yA + sgn * NEEDLE * va);
+          g.lineTo(xb + sgn * NEEDLE * ub, yA + sgn * NEEDLE * vb); g.lineTo(xb, yA);
+          g.closePath(); g.fill();
+        }
+      }
+      g.globalAlpha = 1;
+      {
+        const [u, v] = nv(cur);
+        g.lineCap = 'round';
+        g.strokeStyle = C.cyan; g.lineWidth = 3.5;
+        g.beginPath(); g.moveTo(xt, yA); g.lineTo(xt + NEEDLE * u, yA + NEEDLE * v); g.stroke();
+        g.strokeStyle = C.dim;
+        g.beginPath(); g.moveTo(xt, yA); g.lineTo(xt - NEEDLE * u, yA - NEEDLE * v); g.stroke();
+        g.lineCap = 'butt';
+      }
+      g.fillStyle = cur.fast ? C.unstable : C.ink;
+      g.beginPath(); g.arc(xt, yA, 6, 0, 2 * Math.PI); g.fill();
+      g.font = mono; g.textAlign = 'left';
+      g.fillStyle = C.gold; g.fillText(`travel·fwd ${cur.v.toFixed(0)} mm/s`, Math.min(xt + 10, R - 150), yA - 44);
+      g.fillStyle = C.cyan; g.fillText(`roll·fwd ${cur.r.toFixed(2)}`, Math.min(xt + 10, R - 150), yA + 62);
+      g.fillStyle = C.ink; g.fillText(`tip ${cur.x.toFixed(1)} mm`, Math.min(xt + 10, R - 150), yA - 12 + 0);
+
+      // ── Lower area: relative force vs forward position, plus strips ──
+      const top = Math.max(yA + 90, H * 0.42), bot = H - 46, gap = 14;
+      const hist = o.hist, t1 = cur.t, t0 = t1 - ONE_D_SPAN;
+      const wide = W > 700;
+      // Force plot on the left (or full width on top when narrow), the two
+      // time strips on the right (or below).
+      const PL = 24, PR = wide ? Math.round(W * 0.55) : W - 28;
+      const PT = top, PB = wide ? bot : top + (bot - top) * 0.5 - gap / 2;
+      const SL = wide ? PR + 22 : 24, SR = W - 28;
+      const sTop = wide ? top : PB + gap;
+      const h = (bot - sTop - gap) / 2;
+      const TX = (t) => SL + ((SR - SL) * (t - t0)) / ONE_D_SPAN;
+      const strip = (y, label, get, lo, hi, col) => {
+        g.strokeStyle = C.line; g.lineWidth = 1;
+        g.strokeRect(SL, y, SR - SL, h);
+        const Y = (v) => y + h - (h * (Math.max(lo, Math.min(hi, v)) - lo)) / (hi - lo);
+        if (lo < 0 && hi > 0) { g.beginPath(); g.moveTo(SL, Y(0)); g.lineTo(SR, Y(0)); g.stroke(); }
+        g.lineWidth = 1.6;
+        for (let i = 1; i < hist.length; i++) {
+          const a = hist[i - 1], b = hist[i];
+          g.strokeStyle = b.fast ? C.unstable : col;
+          g.beginPath(); g.moveTo(TX(a.t), Y(get(a))); g.lineTo(TX(b.t), Y(get(b))); g.stroke();
+        }
+        g.font = mono; g.fillStyle = col; g.textAlign = 'left';
+        g.fillText(label, SL + 6, y + 13);
+        g.fillStyle = C.dim; g.textAlign = 'right';
+        g.fillText(`${hi}`, SR - 4, y + 12); g.fillText(`${lo}`, SR - 4, y + h - 4);
+      };
+      const symLim = (m) => Math.pow(10, Math.ceil(Math.log10(Math.max(m, 1e-9))));
+      const vLim = symLim(Math.max(50, ...hist.map((q) => Math.abs(q.v))));
+      strip(sTop, 'travel · forward (mm/s)', (q) => q.v, -vLim, vLim, C.gold);
+      strip(sTop + h + gap, 'roll · forward (unit vector component)', (q) => q.r, -1, 1, C.cyan);
+      g.fillStyle = C.dim; g.font = mono; g.textAlign = 'left'; g.fillText(`−${ONE_D_SPAN} s`, SL, bot + 14);
+      g.textAlign = 'right'; g.fillText('now', SR, bot + 14);
+
+      // Relative force (r̂·v)² against tip forward position. The forward
+      // position is on the same mm scale as the axis above; force on a log
+      // scale (floor 1e-6 m²/s²) so the snap and the slow wind-up both read.
+      const rr = Math.ceil(reach / 10) * 10;
+      const F0 = 1e-6, fMax = Math.max(F0 * 10, ...hist.map((q) => q.f));
+      const fLog = Math.log10(fMax / F0);
+      const PX = (x) => PL + ((PR - PL) * (Math.max(-rr, Math.min(rr, x)) + rr)) / (2 * rr);
+      const PY = (f) => PB - 4 - (PB - PT - 8) * (Math.log10(Math.max(F0, f) / F0) / fLog);
+      g.strokeStyle = C.line; g.lineWidth = 1;
+      g.strokeRect(PL, PT, PR - PL, PB - PT);
+      g.beginPath(); g.moveTo(PX(0), PT); g.lineTo(PX(0), PB); g.stroke();
+      g.lineWidth = 1.6;
+      for (let i = 1; i < hist.length; i++) {
+        const a = hist[i - 1], b = hist[i];
+        g.strokeStyle = b.fast ? C.unstable : C.accent;
+        g.globalAlpha = 0.25 + 0.75 * ((b.t - t0) / ONE_D_SPAN);       // older = fainter
+        g.beginPath(); g.moveTo(PX(a.x), PY(a.f)); g.lineTo(PX(b.x), PY(b.f)); g.stroke();
+      }
+      g.globalAlpha = 1;
+      g.fillStyle = cur.fast ? C.unstable : C.ink;
+      g.beginPath(); g.arc(PX(cur.x), PY(cur.f), 4, 0, 2 * Math.PI); g.fill();
+      // Rowing integral over the last revolution: Σ (r̂·v)²·Δx_fwd, m³/s².
+      const rev = (2 * Math.PI) / SOLVER.SWEEP_RATE;
+      let J = 0;
+      for (let i = 1; i < hist.length; i++) {
+        if (hist[i].t < t1 - rev) continue;
+        J += hist[i - 1].f * (hist[i].x - hist[i - 1].x) / M2MM;
+      }
+      g.font = mono; g.textAlign = 'left'; g.fillStyle = C.accent;
+      g.fillText('relative force (r̂·v)² (m²/s², log) vs tip forward position (mm)', PL + 6, PT + 13);
+      g.fillStyle = C.dim;
+      g.fillText(`−${rr}`, PL + 4, PB - 4);
+      g.textAlign = 'right'; g.fillText(`${rr}`, PR - 4, PB - 4);
+      g.fillText(fMax.toPrecision(2), PR - 4, PT + 26);
+      g.fillStyle = C.gold; g.textAlign = 'left';
+      g.fillText(`∮(r̂·v)²dx, last rev ${J.toPrecision(3)} m³/s²`, PL + 6, PT + 28);
+    };
+    raf = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(raf);
+  }, [feed]);
+  return <canvas ref={ref} className="ctr-oned" />;
+}
+
 function SimulatorWorkspace() {
-  const { sim, patchSim, handoff, layers, patchLayers, themeTick, mech } = useDesign();
+  const { sim, patchSim, handoff, layers, patchLayers, themeTick, mech,
+    setOuterLocked, setOuterPlanar, theme, setTheme, objective, setObjective, simView, setSimView } = useDesign();
   const { alphaDeg, LcMm, extMm, k1, k2 } = sim;
   const lambda = bifurcation(k1, k2, LcMm / 1000, mech);
   const mu = muOf(mech, LcMm / 1000, k2);                 // 0 unless planar
@@ -1424,7 +1743,9 @@ function SimulatorWorkspace() {
      see which one your design actually cares about. */
   const setLayer = useCallback((k, v) => patchLayers({ [k]: v }), [patchLayers]);
   const [layersOpen, setLayersOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [modesOpen, setModesOpen] = useState(false);
+  const outerMode = mech.outerLocked ? 'rigid' : mech.planar ? 'planar' : 'clamped';
+  const setOuterMode = (m) => { setOuterLocked(m === 'rigid'); setOuterPlanar(m === 'planar'); };
   const [side, setSide] = useState(true);
   const [panels, togglePanel] = usePanels({ energy: true, scurve: true });
   const [hud, setHud] = useState({ theta: 0, alpha: 0, kres: 0, V: 0, Vpp: 1, vel: 0, snapping: false });
@@ -1438,7 +1759,10 @@ function SimulatorWorkspace() {
       w1: mech.w1, w2: mech.w2, wy: mech.wy, planar: mech.planar, kScale: mech.kScale };
   }, [alphaDeg, lambda, mu, lamE, k1, k2, LcMm, extMm, sweeping, slow, layers, mech]);
 
-  const theta = useRef(0), vel = useRef(0), flash = useRef(0), subAccum = useRef(0);
+  const theta = useRef(0), vel = useRef(0), flash = useRef(0), subAccum = useRef(0), fastRef = useRef(false);
+  const tipPrev = useRef(null), tipVel = useRef(new THREE.Vector3()), tipInfo = useRef({ spd: 0, rollDeg: null });
+  // 1-D view feed: forward components per frame (robot-local x = forward).
+  const oneD = useRef({ t: 0, hist: [], cur: null });
   const snapEv = useRef(null);                            // in-flight snap, for the compass
   const trail = useRef([]), sweepAlpha = useRef(0);
   const mountRef = useRef(null), energyRef = useRef(null), scurveRef = useRef(null);
@@ -1572,6 +1896,7 @@ function SimulatorWorkspace() {
     grid.position.y = -60; grid.material.transparent = true; grid.material.opacity = 0.18;
     scene.add(grid);
 
+
     const stub = new THREE.Mesh(
       new THREE.CylinderGeometry(4.4, 4.4, 26, 24, 1, true),
       new THREE.MeshPhysicalMaterial({ color: 0x8b949e, metalness: 1.0, roughness: 0.35, envMapIntensity: 1.0, side: THREE.DoubleSide })
@@ -1648,6 +1973,11 @@ function SimulatorWorkspace() {
       res: new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 34, hexInt(C.ink), 9, 5),
     };
     robot.add(arrows.k1, arrows.k2, arrows.res);
+    // Tip motion layer: where the tip is travelling, and the fin's roll
+    // about its own axis at the tip. Robot-local, like the curvature arrows.
+    arrows.vel = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 30, hexInt(C.gold), 9, 5);
+    arrows.roll = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 24, hexInt(C.cyan), 7, 4);
+    robot.add(arrows.vel, arrows.roll);
 
     /* -- Motion path layers ----------------------------------------------
        Drawn as a flat RIBBON of triangles lying in the floor plane, not as a
@@ -1924,6 +2254,8 @@ function SimulatorWorkspace() {
       arrows.k1.setColor(new THREE.Color(hexInt(C.blue)));
       arrows.k2.setColor(new THREE.Color(hexInt(C.sand)));
       arrows.res.setColor(new THREE.Color(hexInt(C.ink)));
+      arrows.vel.setColor(new THREE.Color(hexInt(C.gold)));
+      arrows.roll.setColor(new THREE.Color(hexInt(C.cyan)));
       // Shared by both tracks, so update before asking either to repaint.
       cBuild.setHex(hexInt(C.accent));
       cSnap.setHex(hexInt(C.unstable));
@@ -2107,13 +2439,19 @@ function SimulatorWorkspace() {
       const g = cv.getContext('2d');
       g.clearRect(0, 0, cv.width, cv.height);
       g.fillStyle = C.ink; g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.font = '600 58px Oswald, "Fira Sans", sans-serif';
+      // Shrink long names (FORWARD, OUTWARD) to fit the face.
+      let px = 58;
+      do { g.font = `600 ${px}px Oswald, "Fira Sans", sans-serif`; px -= 2; }
+      while (g.measureText(text).width > cv.width * 0.86 && px > 20);
       g.fillText(text, cv.width / 2, cv.height / 2 + 4);
     };
     const LABELS = [
-      ['RIGHT', [1, 0, 0], [0, Math.PI / 2, 0]], ['LEFT', [-1, 0, 0], [0, -Math.PI / 2, 0]],
-      ['TOP', [0, 1, 0], [-Math.PI / 2, 0, 0]], ['BOTTOM', [0, -1, 0], [Math.PI / 2, 0, 0]],
-      ['FRONT', [0, 0, 1], [0, 0, 0]], ['BACK', [0, 0, -1], [0, Math.PI, 0]],
+      // Robot body frame, from the swimmer's point of view: outward = the
+      // motor base axis (out of the body), forward = direction of travel,
+      // up = the side opposite the outer tube's curvature at α = 0.
+      ['FORWARD', [1, 0, 0], [0, Math.PI / 2, 0]], ['BACK', [-1, 0, 0], [0, -Math.PI / 2, 0]],
+      ['OUTWARD', [0, 1, 0], [-Math.PI / 2, 0, 0]], ['INWARD', [0, -1, 0], [Math.PI / 2, 0, 0]],
+      ['DOWN', [0, 0, 1], [0, 0, 0]], ['UP', [0, 0, -1], [0, Math.PI, 0]],
     ];
     for (const [text, n, rot] of LABELS) {
       const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
@@ -2575,7 +2913,7 @@ function SimulatorWorkspace() {
     let raf, last = performance.now(), hudClock = 0;
     const loop = (now) => {
       raf = requestAnimationFrame(loop);
-      const dt = Math.min((now - last) / 1000, 0.05); last = now;
+      const dt = Math.min((now - last) / 1000, SOLVER.DT_MAX); last = now;
       const p = P.current;
       // Slow motion replays the IDENTICAL discrete dynamics at a fraction of
       // the substep rate — it does not soften the integrator, so the snap
@@ -2584,7 +2922,7 @@ function SimulatorWorkspace() {
       let a = p.alpha;
       let wrapped = false;
       if (p.sweeping) {
-        sweepAlpha.current += dt * 1.1 * tScale;
+        sweepAlpha.current += dt * SOLVER.SWEEP_RATE * tScale;
         if (sweepAlpha.current > Math.PI * 2) {
           // The equilibrium relation α = θ + λ·sinθ is invariant under a
           // SIMULTANEOUS shift of α and θ by 2πn. Shifting α alone (as this
@@ -2601,7 +2939,7 @@ function SimulatorWorkspace() {
         a = sweepAlpha.current;
       } else sweepAlpha.current = a;
 
-      const LR = 0.02, MOM = 0.85, SUB = 6;
+      const { LR, MOM, SUB, VMAX } = SOLVER;
       const before = theta.current;
       subAccum.current += SUB * tScale;
       const steps = Math.floor(subAccum.current);
@@ -2609,7 +2947,7 @@ function SimulatorWorkspace() {
       for (let i = 0; i < steps; i++) {
         const gr = gradient(theta.current, a, p.lambda, p.mu);
         let v = MOM * vel.current - LR * gr;
-        v = Math.max(-0.25, Math.min(0.25, v));
+        v = Math.max(-VMAX, Math.min(VMAX, v));
         vel.current = v; theta.current += v;
       }
       // Rate is measured per SUBSTEP, so the threshold means the same thing
@@ -2622,6 +2960,13 @@ function SimulatorWorkspace() {
       if (!wrapped && p.lamE > LAMBDA_CRIT && rate > SNAP_THRESHOLD) flash.current = 0.45;
       flash.current = Math.max(0, flash.current - dt);
       const snapping = flash.current > 0;
+      // Track colour follows the MEASURED twist rate, not the flash timer:
+      // the timer runs in wall-clock time, so at full speed it kept painting
+      // ~20° of slow post-snap wind-up red (and far less in slo-mo). On a
+      // frame with no substeps (slo-mo) θ did not move, so the previous
+      // verdict stands.
+      if (steps > 0) fastRef.current = !wrapped && p.lamE > LAMBDA_CRIT && rate > SNAP_THRESHOLD;
+      const fast = fastRef.current;
       /* Snap bookkeeping for the compass. A snap is detected on the frame
          the rate first crosses the threshold, and recorded when the flash
          timer expires. What is recorded is the snap's quasi-static arc at
@@ -2685,9 +3030,9 @@ function SimulatorWorkspace() {
           // pts live in the robot group's local frame (pitched -90 deg and
           // lifted onto the base plate), so a sample has to pass through that
           // group matrix before it means anything in floor coordinates.
-          if (p.layers.tipTrack) T.tracks.tip.push(tipW, snapping);
+          if (p.layers.tipTrack) T.tracks.tip.push(tipW, fast);
           else T.tracks.tip.hide();
-          if (p.layers.midTrack) T.tracks.mid.push(T.robot.localToWorld(mid.clone()), snapping);
+          if (p.layers.midTrack) T.tracks.mid.push(T.robot.localToWorld(mid.clone()), fast);
           else T.tracks.mid.hide();
         }
         T.tipOrb.position.copy(tip);
@@ -2711,6 +3056,47 @@ function SimulatorWorkspace() {
             T.arrows[k].position.copy(mid); T.arrows[k].setDirection(dir);
             T.arrows[k].visible = vec && vis;
           });
+
+        /* Tip motion. Travel: the tip's velocity, smoothed over a few
+           frames, arrow length growing with speed. Roll: the fin's material
+           direction at the tip (its own κ₂ direction, θ_tip from the
+           sheath frame, carried unchanged along the free extension), i.e.
+           the rotation of the tip about its own axis. Its angle is measured
+           about the tip axis from FORWARD (robot-local +x) projected into
+           the plane normal to that axis, right-handed about the tangent. */
+        const tl = tip.clone();
+        let vRaw = null;                 // unsmoothed, for the rowing integral
+        if (tipPrev.current && dt > 1e-4) {
+          vRaw = tl.clone().sub(tipPrev.current).divideScalar(dt);
+          tipVel.current.lerp(vRaw, Math.min(1, dt * 12));
+        }
+        tipPrev.current = tl;
+        const tv = p.layers.tipVectors;
+        const roll = tipRoll(Rtip, th);
+        const rollDir = new THREE.Vector3(...roll.dir), rollDeg = roll.deg;
+        const spd = tipVel.current.length();
+        T.arrows.vel.position.copy(tip); T.arrows.roll.position.copy(tip);
+        if (spd > 1) {
+          T.arrows.vel.setDirection(tipVel.current.clone().normalize());
+          const L = Math.min(70, 14 + 12 * Math.log10(1 + spd));
+          T.arrows.vel.setLength(L, Math.min(9, L * 0.35), 5);
+        }
+        T.arrows.vel.visible = tv && spd > 1;
+        T.arrows.roll.setDirection(rollDir);
+        T.arrows.roll.visible = tv;
+        tipInfo.current = { spd, rollDeg };
+        {
+          const o = oneD.current;
+          o.t += dt;
+          // r̂·v on the RAW frame velocity: the smoothed one (used for the
+          // arrows) lags and flattens the snap, which dominates the integral.
+          const vv = vRaw ?? tipVel.current;
+          o.cur = { t: o.t, x: tip.x, v: tipVel.current.x, r: roll.dir[0], fast,
+            f: ((roll.dir[0] * vv.x + roll.dir[1] * vv.y + roll.dir[2] * vv.z) / M2MM) ** 2,   // (r̂·v)², m²/s²
+            reach: (p.Lc + p.Lext) * 1000 };
+          o.hist.push(o.cur);
+          while (o.hist.length && o.t - o.hist[0].t > ONE_D_SPAN) o.hist.shift();
+        }
         T.tick?.(dt);
         T.renderer.render(T.scene, T.cam());
         T.renderCube?.();
@@ -2726,7 +3112,7 @@ function SimulatorWorkspace() {
         const ky = p.wy * p.k2 * Math.sin(theta.current);
         setHud({ theta: theta.current, alpha: a, kres: Math.hypot(kx, ky),
           V: energy(theta.current, a, p.lambda, p.mu), Vpp: stiffness(theta.current, p.lambda, p.mu), vel: rate, snapping,
-          compass: T.compass?.stats() });
+          compass: T.compass?.stats(), tip: { ...tipInfo.current } });
         if (p.sweeping) patchSim({ alphaDeg: Math.round((a * 180) / Math.PI) });
       }
     };
@@ -2741,6 +3127,9 @@ function SimulatorWorkspace() {
     [lambda, k1, k2, LcMm, extMm, mech]);
   const measured = hud.compass && hud.compass.n > 0 ? hud.compass : null;
   const effShown = measured ?? modelEff;
+  const torsionObj = objective === 'torsion';
+  const rowObj = objective === 'rowing';
+  const torEff = useMemo(() => torsionEfficiency(lambda, mu), [lambda, mu]);
   const nLayers = Object.values(layers).filter(Boolean).length;
   const anyTrack = layers.tipTrack || layers.midTrack;
 
@@ -2748,10 +3137,83 @@ function SimulatorWorkspace() {
     <div className="col grow">
       <div className="ctr-body">
         <div className="ctr-view" ref={mountRef}>
+          {simView === '1d' && <OneDView feed={oneD} />}
           <div className="ctr-tl">
+            {/* ── Modes: same look as the Data layers card, opening downward.
+                Outer-tube constraint is the shared design-store setting the
+                optimisation tab edits; theme is app-wide. */}
+            <button className="ctr-layers-btn" onClick={() => setModesOpen((v) => !v)} aria-expanded={modesOpen}>
+              <SlidersHorizontal size={15} /> Modes
+              <span className="cnt">{outerMode === 'rigid' ? 'fixed' : outerMode}</span>
+            </button>
+            {modesOpen && (
+              <div className="ctr-layers-card">
+                <div className="hd"><SlidersHorizontal size={14} color={C.accent} /> Modes</div>
+                <h3>View</h3>
+                <div className="ctr-lyr-grid" style={{ gridTemplateColumns: 'repeat(2,1fr)' }}>
+                  <LayerRow on={simView === '3d'} onChange={() => setSimView('3d')}
+                    icon={Box} color={C.accent} name="3D" desc="The full 3-D scene." />
+                  <LayerRow on={simView === '1d'} onChange={() => setSimView('1d')}
+                    icon={MoveHorizontal} color={C.accent} name="1D"
+                    desc="Forward axis only: the tip's forward position, the forward component of its travel and of its roll vector, with their recent history." />
+                </div>
+                <h3>Outer tube</h3>
+                <div className="ctr-lyr-grid">
+                  <LayerRow on={outerMode === 'clamped'} onChange={() => setOuterMode('clamped')}
+                    icon={Anchor} color={C.accent} name="Clamped"
+                    desc="Clamped at base: the outer tube can twist and bend along its length." />
+                  <LayerRow on={outerMode === 'planar'} onChange={() => setOuterMode('planar')}
+                    icon={RectangleVertical} color={C.accent} name="Planar"
+                    desc="A guide holds the outer tube in its own plane: it bends in-plane and twists, but cannot leave the plane." />
+                  <LayerRow on={outerMode === 'rigid'} onChange={() => setOuterMode('rigid')}
+                    icon={Lock} color={C.accent} name="Fixed"
+                    desc="Fully constrained: the outer tube is rigid and cannot move; only the fin moves." />
+                </div>
+                <h3>Efficiency</h3>
+                <div className="ctr-lyr-grid">
+                  <LayerRow on={objective === 'translation'} onChange={() => setObjective('translation')}
+                    icon={MoveRight} color={C.gold} name="Translation"
+                    desc="η_prop = (F − B)/E: how much of the snap's energy the tip turns into net push. Optimiser scores this." />
+                  <LayerRow on={torsionObj} onChange={() => setObjective('torsion')}
+                    icon={RotateCw} color={C.gold} name="Torsion"
+                    desc="η_T = twist energy released / ΔE: the fin as a torsional spring powering a separate propulsor. Optimiser scores this." />
+                  <LayerRow on={objective === 'rowing'} onChange={() => setObjective('rowing')}
+                    icon={Waves} color={C.gold} name="Rowing"
+                    desc="J_row = ∮(r̂·v)² dx_fwd over one revolution: drag-like (∝ blade-normal speed²) work along forward. Optimiser scores |J_row|." />
+                </div>
+                <h3>Theme</h3>
+                <div className="ctr-lyr-grid" style={{ gridTemplateColumns: 'repeat(2,1fr)' }}>
+                  <LayerRow on={theme === 'light'} onChange={() => setTheme('light')}
+                    icon={Sun} color={C.accent} name="Light" desc="Light surface" />
+                  <LayerRow on={theme === 'dark'} onChange={() => setTheme('dark')}
+                    icon={Moon} color={C.accent} name="Dark" desc="Dark surface (default for instrument screens)" />
+                </div>
+              </div>
+            )}
+            {/* Torsional efficiency (objective = torsion): twist share of ΔE. */}
+            {layers.effCard && torsionObj && (
+              <div className="ctr-eff" title={'Share of the snap\'s released energy that comes out of the twist ½(θ−α)². '
+                + 'This is what a torsional-spring reservoir can hand to a separate propulsor; the rest is bending coupling.'}>
+                <div className="cap-label">Snap torsional efficiency</div>
+                {torEff ? (
+                  <>
+                    <div className="row" style={{ gap: 8, alignItems: 'baseline' }}>
+                      <Cx id="etaT"><span className="v">{(torEff.eta * 100).toFixed(0)}%</span></Cx>
+                      <span className="ft">model · at the fold</span>
+                    </div>
+                    <div className="bar"><i style={{ width: `${torEff.eta * 100}%`, background: C.gold }} /></div>
+                    <div className="ft">
+                      <Cx id="etaT">twist {(torEff.eta * 100).toFixed(0)}% · bending {(100 - torEff.eta * 100).toFixed(0)}%</Cx>
+                    </div>
+                  </>
+                ) : (
+                  <div className="ft" style={{ marginTop: 4 }}>no snap — {mech.planar ? 'λ_eff' : 'λ'} {lamE.toFixed(2)} ≤ π²/4</div>
+                )}
+              </div>
+            )}
             {/* Snap propulsion efficiency: η = (F − B)/E, the net push of the
                 snap arc along the net snap direction over its whole energy. */}
-            <div className="ctr-eff" title={"Share of the snap's energy that ends up pushing along the net snap direction. "
+            {layers.effCard && !torsionObj && <div className="ctr-eff" title={"Share of the snap's energy that ends up pushing along the net snap direction. "
               + 'Backward motion cancels forward; sideways motion counts as lost. Pieces of the arc are weighted '
               + 'by the energy they release. η = (forward − back) / total; a straight snap along the net scores 100%.'}>
               <div className="cap-label">Snap propulsion efficiency</div>
@@ -2779,24 +3241,8 @@ function SimulatorWorkspace() {
               ) : (
                 <div className="ft" style={{ marginTop: 4 }}>no snap — {mech.planar ? 'λ_eff' : 'λ'} {lamE.toFixed(2)} ≤ π²/4</div>
               )}
-            </div>
+            </div>}
 
-            <button className={`ctr-help-btn${helpOpen ? ' on' : ''}`} onClick={() => setHelpOpen((v) => !v)}
-              aria-expanded={helpOpen}>
-              <Keyboard size={12} /> controls
-              {topView && <span style={{ color: C.accent }}>· plan view</span>}
-            </button>
-            {helpOpen && (
-              <div className="ctr-help">
-                <div>drag · orbit</div><div>shift + drag · pan</div><div>scroll · zoom</div>
-                <div>view cube · click a face, edge or corner</div>
-                <div>space · {cubeOn ? 'hide' : 'show'} view cube</div>
-                {topView && <div style={{ color: C.accent }}>plan view · click a cube face to leave</div>}
-                {anyTrack && !topView && (
-                  <div style={{ color: C.accent }}>tracks drawn on floor — view from TOP</div>
-                )}
-              </div>
-            )}
           </div>
 
           {/* What the scene is showing. Read-only: these are owned by the
@@ -2823,6 +3269,13 @@ function SimulatorWorkspace() {
                 <div style={{ color: C.blue }}>— outer tube κ₁</div>
                 <div style={{ color: C.sand }}>— inner tube κ₂</div>
                 <div style={{ color: C.ink }}>— resultant curvature</div>
+              </>
+            )}
+            {layers.tipVectors && (
+              <>
+                <div style={{ marginTop: 6, color: C.gold }}>— tip travel {hud.tip ? `${hud.tip.spd.toFixed(0)} mm/s` : ''}</div>
+                <div style={{ color: C.cyan }}>— tip roll {hud.tip && hud.tip.rollDeg !== null ? `${hud.tip.rollDeg.toFixed(0)}°` : '—'}</div>
+                <div className="dim">roll 0° = forward</div>
               </>
             )}
             {layers.compass && (
@@ -2872,9 +3325,15 @@ function SimulatorWorkspace() {
                   <LayerRow on={layers.vectors} onChange={(v) => setLayer('vectors', v)}
                     icon={MoveUpRight} color={C.ink} name="Curvature"
                     desc="κ₁, κ₂ and their resultant at the end of the overlap." />
+                  <LayerRow on={layers.tipVectors} onChange={(v) => setLayer('tipVectors', v)}
+                    icon={RotateCw} color={C.gold} name="Tip vectors"
+                    desc="At the tip: its direction of travel (length grows with speed) and its roll about its own axis, 0° = pointing FORWARD." />
                 </div>
                 <h3>Energy</h3>
                 <div className="ctr-lyr-grid">
+                  <LayerRow on={layers.effCard} onChange={(v) => setLayer('effCard', v)}
+                    icon={Gauge} color={C.gold} name="Efficiency"
+                    desc="The snap efficiency card, top left: propulsion (η_prop) or torsional (η_T), per Modes → Efficiency." />
                   <LayerRow on={layers.compass} onChange={(v) => setLayer('compass', v)}
                     icon={Zap} color={C.gold} name="Net snap"
                     desc="Each snap as a vector (the direction its arc pushes, length = energy). Bold arrow = their sum; η = propulsion efficiency along it." />
@@ -2976,10 +3435,15 @@ const GRID_N = 50, SURF = 105, HEIGHT = 74;
  *  anything outside them is clipped flat to the floor or the ceiling. */
 const zH = (mJ, { zLo, zHi }) => Math.max(0, Math.min(1, (mJ - zLo) / (zHi - zLo))) * HEIGHT;
 /** The colour channel's formula, rendered once. */
-const SCORE_TEX = katex.renderToString(
-  String.raw`\displaystyle \text{Score} = \eta_{\text{hydro}}\,\frac{\eta_{\text{prop}}\,\Delta E}{W_{\text{in}}}\,\exp\!\Big[-\Big(\frac{\varepsilon_{\text{eq}}}{\varepsilon_{\text{allow}}}\Big)^{4}\Big]`,
+const scoreTex = (e) => katex.renderToString(
+  String.raw`\displaystyle \text{Score} = \eta_{\text{hydro}}\,\frac{${e}\,\Delta E}{W_{\text{in}}}\,\exp\!\Big[-\Big(\frac{\varepsilon_{\text{eq}}}{\varepsilon_{\text{allow}}}\Big)^{4}\Big]`,
   { throwOnError: false });
-const HYDRO_TEX = katex.renderToString(String.raw`\eta_{\text{hydro}} = 1 - e^{-k_\eta\,\eta_{\text{prop}}\,\Delta E}`, { throwOnError: false });
+const hydroTex = (e) => katex.renderToString(String.raw`\eta_{\text{hydro}} = 1 - e^{-k_\eta\,${e}\,\Delta E}`, { throwOnError: false });
+const ETA_SYM = { translation: String.raw`\eta_{\text{prop}}`, torsion: String.raw`\eta_{T}` };
+const SCORE_TEX = { translation: scoreTex(ETA_SYM.translation), torsion: scoreTex(ETA_SYM.torsion),
+  rowing: katex.renderToString(String.raw`\displaystyle \text{Score} = |J_{\text{row}}|\,\exp\!\Big[-\Big(\frac{\varepsilon_{\text{eq}}}{\varepsilon_{\text{allow}}}\Big)^{4}\Big]`, { throwOnError: false }) };
+const HYDRO_TEX = { translation: hydroTex(ETA_SYM.translation), torsion: hydroTex(ETA_SYM.torsion),
+  rowing: katex.renderToString(String.raw`J_{\text{row}} = \oint_{\text{1 rev}} (\hat r\cdot\mathbf v)^2\,dx_{\text{fwd}}`, { throwOnError: false }) };
 
 function OptimizerWorkspace() {
   /* This tab owns the whole specification. Every configured quantity in the
@@ -2987,13 +3451,15 @@ function OptimizerWorkspace() {
      of the robot at any moment. */
   const { applyDesign, sim, patchSim,
     domain, patchDomain, themeTick, tubes, patchTube, setTubes, outerLocked, setOuterLocked,
-    outerPlanar, setOuterPlanar, mech, openCite } = useDesign();
+    outerPlanar, setOuterPlanar, mech, openCite, objective, setObjective } = useDesign();
   const { LcMm, extMm, k1, k2 } = sim;
+  const torsionObj = objective === 'torsion';
+  const rowObj = objective === 'rowing';
   // Part 6: the allowable strain must be justified by a target cycle life,
   // not hardcoded to the 8% monotonic superelastic limit — at 8% the gate is
   // inert over the whole practical κ range and the optimum just walks to the
   // corner of the parameter box.
-  const { logLife, etaK, clip, kMin, kMax, LcMinMm, LcMaxMm, zAuto, zMin, zMax } = domain;
+  const { logLife, etaK, clip, kMin, kMax, LcMinMm, LcMaxMm, zAuto, zMin, zMax, rowRevs, rowJitter } = domain;
   const setLogLife = (v) => patchDomain({ logLife: v });
   const setEtaK = (v) => patchDomain({ etaK: v });
   const setClip = (v) => patchDomain({ clip: v });
@@ -3016,10 +3482,52 @@ function OptimizerWorkspace() {
   // The typed x bound, optionally clipped by that fatigue ceiling.
   const kappaMax = Math.max(kMin + 0.1, clip ? Math.min(kMax, kappaCeiling) : kMax);
 
+  /* Rowing: J_row averaged over rowRevs jittered revolutions per design.
+     Too slow to do inside a render (≈ 0.8 s per revolution-grid), so it is
+     computed in time-sliced chunks with a progress readout; the previous
+     complete result stays on screen until the new one is ready. Each design
+     gets its own seed, so the average does not share one jitter sequence. */
+  const [rowRes, setRowRes] = useState({ token: 0, data: null, prog: 1 });
+  const rowToken = useRef(0);
+  useEffect(() => {
+    if (objective !== 'rowing') return undefined;
+    const token = ++rowToken.current;
+    const N = GRID_N * GRID_N, data = new Float64Array(3 * N);
+    const LcMin = LcMinMm / 1000, LcMax = LcMaxMm / 1000, Lext = extMm / 1000;
+    let n = 0, timer = null;
+    setRowRes((r) => ({ ...r, prog: 0 }));
+    const step = () => {
+      if (token !== rowToken.current) return;
+      const t0 = performance.now();
+      while (n < N && performance.now() - t0 < 40) {
+        const i = n % GRID_N, j = Math.floor(n / GRID_N);
+        const kappa = kMin + ((kappaMax - kMin) * i) / (GRID_N - 1);
+        const Lc = LcMin + ((LcMax - LcMin) * j) / (GRID_N - 1);
+        const lambda = mech.C * Lc * Lc * kappa * kappa, mu = muOf(mech, Lc, kappa);
+        if (lamEff(lambda, mu) > LAMBDA_CRIT) {
+          const r = rowingIntegral(lambda, mu, kappa, kappa, Lc, Lext, mech,
+            Math.max(1, Math.round(rowRevs)), rowJitter / 100, 1 + n);
+          data[3 * n] = r.J; data[3 * n + 1] = r.Jabs; data[3 * n + 2] = r.sd;
+        }
+        n++;
+      }
+      if (n < N) {
+        setRowRes((r) => ({ ...r, prog: n / N }));
+        timer = setTimeout(step, 0);
+      } else setRowRes({ token, data, prog: 1 });
+    };
+    timer = setTimeout(step, 0);
+    return () => { rowToken.current++; clearTimeout(timer); };
+  }, [objective, kMin, kappaMax, LcMinMm, LcMaxMm, mech, extMm, rowRevs, rowJitter]);
+
   const grid = useMemo(() => buildGrid({
     nx: GRID_N, ny: GRID_N, kappaMin: kMin, kappaMax, LcMin: LcMinMm / 1000, LcMax: LcMaxMm / 1000,
-    strainLimit, etaK, mech, Lext: extMm / 1000,
-  }), [kMin, kappaMax, LcMinMm, LcMaxMm, strainLimit, etaK, mech, extMm]);
+    strainLimit, etaK, mech, Lext: extMm / 1000, objective,
+    // Until the first averaged result exists, zeros (flat) rather than a
+    // synchronous one-revolution pass that would freeze the page.
+    rowData: objective === 'rowing' ? (rowRes.data ?? new Float64Array(3 * GRID_N * GRID_N)) : null,
+  }), [kMin, kappaMax, LcMinMm, LcMaxMm, strainLimit, etaK, mech, extMm, objective, rowRes.data]);
+  const rowBusy = objective === 'rowing' && rowRes.prog < 1;
   // z range in mJ: auto runs from 0 to the tallest design; typed bounds clip
   // the surface flat outside [zLo, zHi]. The hover loop reads it via a ref.
   const zLo = zAuto ? 0 : zMin;
@@ -3457,7 +3965,7 @@ function OptimizerWorkspace() {
       const v = zr.zLo + ((zr.zHi - zr.zLo) * i) / eTicks;
       at(label(v.toFixed(zr.zHi - zr.zLo < 20 ? 1 : 0), 30, TICK), -OUT + 6, 1 + (HEIGHT * i) / eTicks, -SURF);
     }
-    at(label('E_snap·η_prop  (mJ)', 34, TITLE), -OUT + 4, HEIGHT + 20, -SURF);
+    at(label(rowObj ? 'J_row  (m³/s²)' : torsionObj ? 'E_snap·η_T  (mJ)' : 'E_snap·η_prop  (mJ)', 34, TITLE), -OUT + 4, HEIGHT + 20, -SURF);
 
     if (grid.best) {
       const bi = cells.indexOf(grid.best);
@@ -3472,7 +3980,7 @@ function OptimizerWorkspace() {
     // themeTick: the surface's vertex colours, the contour tubes and every
     // axis label are built from the palette here, so a theme change has to
     // rerun this the same way a new grid does.
-  }, [grid, strainLimit, themeTick, zLo, zHi]);
+  }, [grid, strainLimit, themeTick, zLo, zHi, torsionObj, rowObj]);
 
   const analysis = useMemo(() => {
     const { cells } = grid;
@@ -3508,8 +4016,8 @@ function OptimizerWorkspace() {
           <div className="ctr-scorecard" style={{ marginTop: 0 }} onClick={(e) => { e.stopPropagation(); openCite('score', 'Score colour', e); }}
             title="Where does this come from?">
             <div className="cap-label" style={{ marginBottom: 2 }}>Colour · Score</div>
-            <div dangerouslySetInnerHTML={{ __html: SCORE_TEX }} />
-            <div style={{ marginTop: 2 }} dangerouslySetInnerHTML={{ __html: HYDRO_TEX }} />
+            <div dangerouslySetInnerHTML={{ __html: SCORE_TEX[objective] }} />
+            <div style={{ marginTop: 2 }} dangerouslySetInnerHTML={{ __html: HYDRO_TEX[objective] }} />
             <div className="mono t9 dim" style={{ marginTop: 4 }}>
               k_η = {etaK} · <M>{'ε_allow'}</M> = {strainPct.toFixed(2)}% · colour = Score / max
             </div>
@@ -3529,6 +4037,12 @@ function OptimizerWorkspace() {
         </div>
 
         <ColorBar max={grid.maxScore} label="Score [–]" />
+        {rowBusy && (
+          <div className="ctr-overlay mono" style={{ top: 12, left: '50%', transform: 'translateX(-50%)', color: C.gold }}>
+            averaging J_row over {Math.round(rowRevs)} revolutions per design… {(rowRes.prog * 100).toFixed(0)}%
+            {rowRes.data ? ' (showing the previous result)' : ''}
+          </div>
+        )}
 
         <div className="ctr-tip" ref={tipRef} style={{ display: 'none' }}>
           {hover && (() => {
@@ -3540,8 +4054,11 @@ function OptimizerWorkspace() {
                 </div>
                 <hr />
                 <Row k="Snap energy" v={`${(hover.dE_J * 1000).toFixed(2)} mJ`} c={C.gold} />
-                <Row k="Propulsion eff." v={`${(hover.etaP * 100).toFixed(0)} %`} c={C.gold} />
-                <Row k="Productive" v={`${(hover.prod_J * 1000).toFixed(2)} mJ`} c={C.gold} />
+                <Row k="Propulsion eff." v={`${(hover.etaP * 100).toFixed(0)} %`} c={torsionObj ? C.dim : C.gold} />
+                <Row k="Torsional eff." v={`${(hover.etaT * 100).toFixed(0)} %`} c={torsionObj ? C.gold : C.dim} />
+                {rowObj
+                  ? <Row k="Rowing J" v={`${hover.rowJ.toPrecision(3)} m³/s²`} c={C.gold} />
+                  : <Row k="Productive" v={`${(hover.prod_J * 1000).toFixed(2)} mJ`} c={C.gold} />}
                 <Row k="λ [–]" v={hover.lambda.toFixed(2)} c={hover.lamEff > LAMBDA_CRIT ? C.gold : C.dim} />
                 {mech.planar && <Row k="λ_eff [–]" v={hover.lamEff.toFixed(2)} c={hover.lamEff > LAMBDA_CRIT ? C.gold : C.dim} />}
                 <Row k="Equiv. strain" v={`${(hover.eeq * 100).toFixed(2)} %`} c={hover.eeq > strainLimit ? C.red : C.green} />
@@ -3568,8 +4085,13 @@ function OptimizerWorkspace() {
               </div>
               <p className="ctr-p">
                 Releases <Cx id="scale">{(best.dE_J * 1000).toFixed(1)} mJ</Cx> per snap,{' '}
-                <Cx id="eta">{(best.etaP * 100).toFixed(0)}%</Cx> of it pushing forward
-                (<Cx id="prod">{(best.prod_J * 1000).toFixed(1)} mJ</Cx> productive), at{' '}
+                {rowObj
+                  ? <>with a rowing integral of <Cx id="rowing">{best.rowJ.toPrecision(3)} m³/s²</Cx> per revolution
+                    (± {best.rowSd.toPrecision(2)} sd across {Math.round(rowRevs)} revolutions; {best.rowAbs > 0 ? ((100 * Math.abs(best.rowJ)) / best.rowAbs).toFixed(0) : 0}% net, {best.rowJ >= 0 ? 'forward' : 'backward'} stroke), at{' '}</>
+                  : <>{torsionObj
+                    ? <><Cx id="etaT">{(best.etaT * 100).toFixed(0)}%</Cx> of it released as twist</>
+                    : <><Cx id="eta">{(best.etaP * 100).toFixed(0)}%</Cx> of it pushing forward</>}
+                  {' '}(<Cx id="prod">{(best.prod_J * 1000).toFixed(1)} mJ</Cx> productive), at{' '}</>}
                 <Cx id="eeq">{(best.eeq * 100).toFixed(2)}%</Cx> equivalent strain, against a fatigue
                 allowable of <Cx id="allow">{strainPct.toFixed(2)}%</Cx>. Predicted life{' '}
                 <Cx id="life">{fmtN(best.N)}</Cx> cycles at λ = <Cx id="lambda">{best.lambda.toFixed(2)}</Cx>.
@@ -3732,6 +4254,31 @@ function OptimizerWorkspace() {
             the plot, not properties of the robot. All typed. */}
         <Panel title="Graph axes" open={panels.axes} onToggle={() => togglePanel('axes')}
           icon={<Sliders size={14} color={C.dim} />} right={`${GRID_N}×${GRID_N}`}>
+          <div className="cap-label">Optimise for</div>
+          <div className="ctr-seg" style={{ marginBottom: 8 }}>
+            <button className={objective === 'translation' ? 'on' : ''} onClick={() => setObjective('translation')}
+              title="η_prop = (F − B)/E: the tip's net push along the snap direction">
+              Translation · η_prop
+            </button>
+            <button className={torsionObj ? 'on' : ''} onClick={() => setObjective('torsion')}
+              title="η_T = ΔE_twist / ΔE: the share of the snap released as twist, for a torsional-spring reservoir driving a separate propulsor">
+              Torsion · η_T
+            </button>
+            <button className={rowObj ? 'on' : ''} onClick={() => setObjective('rowing')}
+              title="J_row = ∮(r̂·v)² dx_fwd over one revolution, after F_D = ½ρC_D A v² with ρ, C_D, A left out (they do not depend on κ or L_c). Score uses |J_row|.">
+              Rowing · J_row
+            </button>
+          </div>
+          {rowObj && (
+            <div className="ctr-axes" style={{ marginBottom: 8 }}>
+              <span className="t">revolutions</span>
+              <NumField value={rowRevs} min={1} max={200} digits={0} step={5}
+                title="revolutions averaged per design" onCommit={(v) => patchDomain({ rowRevs: v })} />
+              <span className="t">jitter %</span>
+              <NumField value={rowJitter} min={0} max={80} digits={0} step={5}
+                title="frame-time jitter, % of a 60 fps frame" onCommit={(v) => patchDomain({ rowJitter: v })} />
+            </div>
+          )}
           <div className="ctr-axes">
             <span /><span className="h">min</span><span className="h">max</span><span />
             <span className="t">x · κ</span>
@@ -3746,12 +4293,12 @@ function OptimizerWorkspace() {
             <NumField value={LcMaxMm} min={LcMinMm + 0.1} max={100000} digits={1} step={5}
               title="overlap axis maximum, mm" onCommit={(v) => patchDomain({ LcMaxMm: v })} />
             <span className="u">mm</span>
-            <span className="t">z · <M>{'E_snap'}</M>·η</span>
+            <span className="t">z · {rowObj ? <M>{'J_row'}</M> : <><M>{'E_snap'}</M>·{torsionObj ? <M>{'η_T'}</M> : 'η'}</>}</span>
             <NumField value={zLo} min={0} max={Math.max(0, zHi - 0.001)} digits={1} step={10}
-              title="height axis minimum, mJ" onCommit={(v) => patchDomain({ zAuto: false, zMin: v, zMax: zHi })} />
+              title={`height axis minimum, ${rowObj ? 'm³/s²' : 'mJ'}`} onCommit={(v) => patchDomain({ zAuto: false, zMin: v, zMax: zHi })} />
             <NumField value={zHi} min={zLo + 0.001} max={1e7} digits={1} step={10}
-              title="height axis maximum, mJ" onCommit={(v) => patchDomain({ zAuto: false, zMin: zLo, zMax: v })} />
-            <span className="u">mJ</span>
+              title={`height axis maximum, ${rowObj ? 'm³/s²' : 'mJ'}`} onCommit={(v) => patchDomain({ zAuto: false, zMin: zLo, zMax: v })} />
+            <span className="u">{rowObj ? 'm³/s²' : 'mJ'}</span>
           </div>
           <label className="ctr-check">
             <input type="checkbox" checked={zAuto}
@@ -3869,6 +4416,289 @@ const KIND_CSS = {
   adopted: 'var(--signal-good)', derived: 'var(--riverside-blue-500)', assumed: 'var(--signal-watch)',
 };
 
+/* ═══════════════════════════════════════════════════════════════
+   LOGS · averaged tip translation and roll over one revolution
+   ═══════════════════════════════════════════════════════════════
+   The live view runs the heavy-ball solver once per animation frame, with
+   α advanced by the frame's wall-clock dt but a FIXED number of substeps.
+   So the snap's timing and ringing depend on frame timing, and no two
+   revolutions are drawn identically. Here the same solver is run offline
+   for many revolutions with frame times drawn around the target frame rate
+   (± jitter), each revolution is resampled on a common α grid, and the
+   samples are averaged. The first revolution is a discarded transient.   */
+
+
+/** Runs the solver; returns per-frame (α, θ) over warm-up + `cycles` revs. */
+function runSweepFrames({ lambda, mu, cycles, fps, jitter, seed }) {
+  const { LR, MOM, SUB, VMAX, SWEEP_RATE, DT_MAX } = SOLVER;
+  const rnd = mulberry32(seed);
+  const gauss = () => Math.sqrt(-2 * Math.log(1 - rnd())) * Math.cos(2 * Math.PI * rnd());
+  const aEnd = 2 * Math.PI * (cycles + 1) + 0.5;
+  const A = [0], TH = [0];
+  let a = 0, th = 0, v = 0;
+  while (a < aEnd) {
+    const dt = Math.min(DT_MAX, Math.max(0.2 / fps, (1 / fps) * (1 + jitter * gauss())));
+    a += dt * SWEEP_RATE;
+    for (let i = 0; i < SUB; i++) {
+      v = Math.max(-VMAX, Math.min(VMAX, MOM * v - LR * gradient(th, a, lambda, mu)));
+      th += v;
+    }
+    A.push(a); TH.push(th);
+  }
+  return { A, TH };
+}
+
+/** Async, chunked per revolution so the page stays responsive. */
+async function buildLogs(cfg, onProgress) {
+  const { k1, k2, Lc, Lext, mech, cycles, dtMs } = cfg;
+  const lambda = bifurcation(k1, k2, Lc, mech), mu = muOf(mech, Lc, k2);
+  const { A, TH } = runSweepFrames({ lambda, mu, ...cfg });
+  const W = SOLVER.SWEEP_RATE, period = (2 * Math.PI) / W, dt = dtMs / 1000;
+  const K = Math.max(2, Math.floor(period / dt + 1e-9));     // samples per rev
+  const thAt = (() => {
+    let j = 0;                                   // α is monotone: walk forward
+    return (a) => {
+      while (j < A.length - 2 && A[j + 1] < a) j++;
+      const f = (a - A[j]) / (A[j + 1] - A[j]);
+      return TH[j] + (TH[j + 1] - TH[j]) * f;
+    };
+  })();
+  const raw = [];                                // [cycle][k] samples
+  for (let c = 0; c < cycles; c++) {
+    const rows = [];
+    for (let k = 0; k <= K; k++) {               // K+1: last one closes the step
+      const a = 2 * Math.PI * (c + 1) + W * k * dt, th = thAt(a);
+      const { pts, Rtip } = integrateShape(a, th, k1, k2, Lc, Lext, mech.w1, mech.w2, mech.wy);
+      const tp = pts[pts.length - 1], r = tipRoll(Rtip, th);
+      rows.push({ th, p: [tp.x, tp.y, tp.z], roll: r.deg, rdir: r.dir });
+    }
+    raw.push(rows);
+    if (c % 4 === 3) { onProgress?.((c + 1) / cycles); await new Promise((res) => setTimeout(res, 0)); }
+  }
+  // Per-sample averages across revolutions.
+  const avg = [];
+  for (let k = 0; k < K; k++) {
+    const m = { p: [0, 0, 0], d: [0, 0, 0], rd: [0, 0, 0], spd: 0, spd2: 0, rs: 0, rc: 0, snap: 0, nr: 0 };
+    for (let c = 0; c < cycles; c++) {
+      const s0 = raw[c][k], s1 = raw[c][k + 1];
+      const d = [0, 1, 2].map((i) => s1.p[i] - s0.p[i]);
+      const sp = Math.hypot(d[0], d[1], d[2]) / dt;
+      for (let i = 0; i < 3; i++) { m.p[i] += s0.p[i]; m.d[i] += d[i]; m.rd[i] += s0.rdir[i]; }
+      m.spd += sp; m.spd2 += sp * sp;
+      if (s0.roll !== null) { m.rs += Math.sin((s0.roll * Math.PI) / 180); m.rc += Math.cos((s0.roll * Math.PI) / 180); m.nr++; }
+      if (Math.abs(s1.th - s0.th) / dt > SNAP_THRESHOLD) m.snap++;
+    }
+    const n = cycles, sp = m.spd / n;
+    const R = m.nr ? Math.hypot(m.rs, m.rc) / m.nr : 0;
+    const rn = Math.hypot(m.rd[0], m.rd[1], m.rd[2]) || 1;
+    avg.push({
+      t: k * dt, alpha: (W * k * dt * 180) / Math.PI,
+      p: m.p.map((x) => x / n),
+      d: m.d.map((x) => x / n),
+      v: m.d.map((x) => x / n / dt),
+      spd: sp, spdSd: Math.sqrt(Math.max(0, m.spd2 / n - sp * sp)),
+      roll: m.nr ? (Math.atan2(m.rs, m.rc) * 180) / Math.PI : null,
+      rollSd: m.nr && R > 0 ? (Math.sqrt(-2 * Math.log(Math.min(1, R))) * 180) / Math.PI : null,
+      rdir: m.rd.map((x) => x / rn),
+      snap: m.snap / n,
+    });
+  }
+  onProgress?.(1);
+  // Snaps per revolution: fast samples (rate > SNAP_THRESHOLD) grouped into
+  // one event unless separated by more than SNAP_GAP s of slow motion, so the
+  // ringing after a snap, which can dip below the threshold, is not counted
+  // as further snaps.
+  const SNAP_GAP = 0.3;
+  const snapsPerRev = raw.map((rows) => {
+    let n = 0, lastFast = -Infinity;
+    for (let k = 0; k < K; k++) {
+      if (Math.abs(rows[k + 1].th - rows[k].th) / dt <= SNAP_THRESHOLD) continue;
+      if (k * dt - lastFast > SNAP_GAP) n++;
+      lastFast = k * dt;
+    }
+    return n;
+  });
+  return { lambda, mu, K, dt, period, cycles, avg, raw, snapsPerRev };
+}
+
+const f4 = (x) => (x === null || !Number.isFinite(x) ? '' : x.toFixed(4));
+function logsAveragedCsv(L, head) {
+  const cols = ['t_s', 'alpha_deg',
+    'tip_forward_mm', 'tip_up_mm', 'tip_outward_mm',
+    'dtrans_forward_mm', 'dtrans_up_mm', 'dtrans_outward_mm',
+    'vel_forward_mm_s', 'vel_up_mm_s', 'vel_outward_mm_s',
+    'speed_mean_mm_s', 'speed_sd_mm_s',
+    'roll_mean_deg', 'roll_circ_sd_deg', 'roll_dir_forward', 'roll_dir_up', 'roll_dir_outward',
+    'snap_fraction'];
+  const lines = L.avg.map((r) => [r.t, r.alpha, ...r.p, ...r.d, ...r.v, r.spd, r.spdSd,
+    r.roll, r.rollSd, ...r.rdir, r.snap].map(f4).join(','));
+  return head + cols.join(',') + '\n' + lines.join('\n') + '\n';
+}
+function logsRawCsv(L, head) {
+  const cols = ['cycle', 't_s', 'alpha_deg', 'theta_tip_rad',
+    'tip_forward_mm', 'tip_up_mm', 'tip_outward_mm',
+    'dtrans_forward_mm', 'dtrans_up_mm', 'dtrans_outward_mm',
+    'roll_deg', 'roll_dir_forward', 'roll_dir_up', 'roll_dir_outward'];
+  const out = [];
+  L.raw.forEach((rows, c) => {
+    for (let k = 0; k < L.K; k++) {
+      const s0 = rows[k], s1 = rows[k + 1];
+      out.push([c + 1, k * L.dt, (SOLVER.SWEEP_RATE * k * L.dt * 180) / Math.PI, s0.th, ...s0.p,
+        ...[0, 1, 2].map((i) => s1.p[i] - s0.p[i]), s0.roll, ...s0.rdir]
+        .map((x, i) => (i === 0 ? String(x) : f4(x))).join(','));
+    }
+  });
+  return head + cols.join(',') + '\n' + out.join('\n') + '\n';
+}
+function saveText(name, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
+  const a = document.createElement('a'); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Mean line with a ±sd band, over one revolution. */
+function LogPlot({ rows, get, sd, label, unit, color, wrap }) {
+  const Wd = 640, H = 150, P = 34;
+  const ys = rows.map(get).filter((v) => v !== null);
+  if (!ys.length) return null;
+  let lo = wrap ? -180 : Math.min(0, ...rows.map((r) => (get(r) ?? 0) - (sd?.(r) ?? 0)));
+  let hi = wrap ? 180 : Math.max(...rows.map((r) => (get(r) ?? 0) + (sd?.(r) ?? 0)), 1e-9);
+  const X = (i) => P + ((Wd - P - 8) * i) / Math.max(1, rows.length - 1);
+  const Y = (v) => 8 + (H - 24) * (1 - (v - lo) / (hi - lo));
+  const segs = []; let cur = [];
+  rows.forEach((r, i) => {
+    const v = get(r);
+    if (v === null) { if (cur.length) segs.push(cur); cur = []; return; }
+    if (wrap && cur.length && Math.abs(v - get(rows[i - 1])) > 180) { segs.push(cur); cur = []; }
+    cur.push(`${X(i).toFixed(1)},${Y(v).toFixed(1)}`);
+  });
+  if (cur.length) segs.push(cur);
+  const band = sd && !wrap ? rows.map((r, i) => `${X(i)},${Y(get(r) + sd(r))}`).join(' ') + ' '
+    + rows.map((r, i) => `${X(i)},${Y(Math.max(lo, get(r) - sd(r)))}`).reverse().join(' ') : null;
+  return (
+    <div className="ctr-logplot">
+      <div className="cap-label">{label} <span className="dim">({unit})</span></div>
+      <svg viewBox={`0 0 ${Wd} ${H}`} width="100%" preserveAspectRatio="none" style={{ height: H }}>
+        <line x1={P} x2={Wd - 8} y1={Y(wrap ? 0 : lo)} y2={Y(wrap ? 0 : lo)} stroke={C.line} />
+        {band && <polygon points={band} fill={color} opacity="0.15" />}
+        {segs.map((sg, i) => <polyline key={i} points={sg.join(' ')} fill="none" stroke={color} strokeWidth="1.6" />)}
+        <text x={2} y={Y(hi) + 4} fontSize="10" fill={C.dim}>{hi.toFixed(0)}</text>
+        <text x={2} y={Y(lo)} fontSize="10" fill={C.dim}>{lo.toFixed(0)}</text>
+        <text x={P} y={H - 2} fontSize="10" fill={C.dim}>α 0°</text>
+        <text x={Wd - 40} y={H - 2} fontSize="10" fill={C.dim}>360°</text>
+      </svg>
+    </div>
+  );
+}
+
+function LogsPage() {
+  const { sim, mech } = useDesign();
+  const { LcMm, extMm, k1, k2 } = sim;
+  const [cfg, setCfg] = useState({ dtMs: 10, cycles: 100, fps: 60, jitterPct: 10, seed: 1 });
+  const patch = (p) => setCfg((c) => ({ ...c, ...p }));
+  const [busy, setBusy] = useState(null);
+  const [L, setL] = useState(null);
+  const lambda = bifurcation(k1, k2, LcMm / 1000, mech);
+  const lamE = lamEff(lambda, muOf(mech, LcMm / 1000, k2));
+  const mode = mech.outerLocked ? 'fully constrained' : mech.planar ? 'planar' : 'clamped';
+  const period = (2 * Math.PI) / SOLVER.SWEEP_RATE;
+  const designKey = `${k1}|${k2}|${LcMm}|${extMm}|${mode}`;
+  const stale = L && L.key !== designKey;
+
+  const run = async () => {
+    setBusy(0);
+    const res = await buildLogs({ k1, k2, Lc: LcMm / 1000, Lext: extMm / 1000, mech,
+      cycles: Math.round(cfg.cycles), dtMs: cfg.dtMs, fps: cfg.fps, jitter: cfg.jitterPct / 100,
+      seed: Math.round(cfg.seed) }, (f) => setBusy(f));
+    setL({ ...res, key: designKey, cfg: { ...cfg } });
+    setBusy(null);
+  };
+  const header = (Lg) => [
+    `# CTR fin tip log · ${new Date().toISOString()}`,
+    `# design: k1 ${k1} 1/m, k2 ${k2} 1/m, Lc ${LcMm} mm, Lext ${extMm} mm, outer ${mode}, lambda ${Lg.lambda.toFixed(4)}`,
+    `# solver: heavy-ball LR ${SOLVER.LR} MOM ${SOLVER.MOM} SUB ${SOLVER.SUB}/frame, sweep ${SOLVER.SWEEP_RATE} rad/s, ${Lg.cfg.fps} fps +/- ${Lg.cfg.jitterPct}% frame jitter, seed ${Lg.cfg.seed}`,
+    `# ${Lg.cycles} revolutions after 1 discarded warm-up, timestep ${Lg.cfg.dtMs} ms (${Lg.K} samples/rev)`,
+    `# axes (robot body frame): forward, up, outward (= motor base axis); roll 0 deg = forward, right-handed about the tip axis`,
+    `# dtrans = tip displacement over the next timestep; vel = dtrans / timestep`,
+    ''].join('\n');
+  const fname = (kind) => `ctr-tip-${kind}-k${k2}-Lc${LcMm}-${L.cfg.dtMs}ms-${L.cycles}rev.csv`;
+  const mean = (xs) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
+
+  return (
+    <div className="ctr-logs">
+      <div className="ctr-logs-in">
+        <h2><ScrollText size={16} color={C.accent} /> Tip logs</h2>
+        <p className="ctr-p">
+          Tip translation and roll over one motor revolution, for the current design. The 3-D
+          view's solver advances the motor by each frame's real duration but always takes the
+          same number of solver steps, so frame timing shifts the snap and its ringing and no two
+          revolutions match. This runs that same solver offline for many revolutions at the
+          frame rate below, with random frame-time jitter, puts every revolution on the same
+          time grid, and averages them.
+        </p>
+        <div className="ctr-logs-design mono">
+          κ₁ {k1.toFixed(2)} · κ₂ {k2.toFixed(2)} m⁻¹ · L_c {LcMm.toFixed(0)} mm · L_ext {extMm.toFixed(0)} mm
+          {' · '}outer {mode} · {mech.planar ? 'λ_eff' : 'λ'} {(mech.planar ? lamE : lambda).toFixed(2)}
+          {lamE > LAMBDA_CRIT ? ' · snaps' : ' · no snap'}
+        </div>
+
+        <div className="ctr-logs-cfg">
+          <label><span>Timestep</span><NumField value={cfg.dtMs} min={1} max={500} digits={0} step={1}
+            title="sample spacing, ms" onCommit={(v) => patch({ dtMs: v })} /><i>ms</i></label>
+          <label><span>Revolutions</span><NumField value={cfg.cycles} min={1} max={1000} digits={0} step={10}
+            title="revolutions averaged" onCommit={(v) => patch({ cycles: v })} /><i>rev</i></label>
+          <label><span>Frame rate</span><NumField value={cfg.fps} min={10} max={240} digits={0} step={10}
+            title="simulated display frame rate" onCommit={(v) => patch({ fps: v })} /><i>fps</i></label>
+          <label><span>Frame jitter</span><NumField value={cfg.jitterPct} min={0} max={80} digits={0} step={5}
+            title="frame-time standard deviation, % of a frame" onCommit={(v) => patch({ jitterPct: v })} /><i>%</i></label>
+          <label><span>Seed</span><NumField value={cfg.seed} min={0} max={1e9} digits={0} step={1}
+            title="random seed for the frame jitter" onCommit={(v) => patch({ seed: v })} /><i /></label>
+        </div>
+        <div className="mono dim t9" style={{ marginBottom: 10 }}>
+          one revolution = {period.toFixed(3)} s at {SOLVER.SWEEP_RATE} rad/s →{' '}
+          {Math.floor(period / (cfg.dtMs / 1000))} samples per revolution
+        </div>
+        <button className="ctr-btn primary" onClick={run} disabled={busy !== null}>
+          {busy !== null ? `Running… ${(busy * 100).toFixed(0)}%` : <><Play size={13} /> Run {Math.round(cfg.cycles)} revolutions</>}
+        </button>
+
+        {L && (
+          <div className="ctr-logs-res">
+            {stale && <div className="ctr-logs-warn">The design has changed since this run. Run again to log the current one.</div>}
+            <div className="ctr-logs-stats mono">
+              <span>{L.cycles} rev · {L.K} samples/rev · Δt {L.cfg.dtMs} ms</span>
+              <span>snaps / rev {mean(L.snapsPerRev).toFixed(2)} (min {Math.min(...L.snapsPerRev)}, max {Math.max(...L.snapsPerRev)})</span>
+              <span>mean tip speed {mean(L.avg.map((r) => r.spd)).toFixed(1)} mm/s · peak {Math.max(...L.avg.map((r) => r.spd)).toFixed(0)} mm/s</span>
+            </div>
+            <LogPlot rows={L.avg} get={(r) => r.spd} sd={(r) => r.spdSd} label="Tip speed, mean ± sd across revolutions" unit="mm/s" color={C.gold} />
+            <LogPlot rows={L.avg} get={(r) => r.roll} label="Tip roll, circular mean" unit="deg, 0 = forward" color={C.cyan} wrap />
+            <LogPlot rows={L.avg} get={(r) => r.snap * 100} label="Revolutions snapping at this instant" unit="%" color={C.unstable} />
+            <div className="row" style={{ gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+              <button className="ctr-btn primary" onClick={() => saveText(fname('avg'), logsAveragedCsv(L, header(L)))}>
+                <Download size={13} /> Averaged CSV ({L.K} rows)
+              </button>
+              <button className="ctr-btn" onClick={() => saveText(fname('raw'), logsRawCsv(L, header(L)))}>
+                <Download size={13} /> Every revolution CSV ({(L.K * L.cycles).toLocaleString()} rows)
+              </button>
+            </div>
+            <p className="ctr-p" style={{ fontSize: 11.5, marginTop: 10 }}>
+              Axes are the robot body frame: forward, up, outward (the motor base axis), in mm.
+              Translation vector = the tip's displacement over the next timestep (and that divided
+              by the timestep as a velocity). Roll vector = the fin's material direction at the tip,
+              a unit vector perpendicular to the tip; roll angle 0° = forward, right-handed about
+              the tip axis. Positions and vectors are arithmetic means across revolutions, the roll
+              angle is a circular mean, and the roll vector is renormalised after averaging. Where
+              revolutions snap at slightly different instants, the average spreads the snap over
+              those instants; the snap column shows how many revolutions were snapping there.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function CitePop({ pop, onGo }) {
   const e = EQ_BY_ID[pop.id];
   const html = useMemo(() => katex.renderToString(e.tex, { throwOnError: false }), [e]);
@@ -3954,11 +4784,12 @@ export default function CTRWorkbench() {
   const tabs = [
     { id: 'sim', label: 'Interactive 3D simulator', icon: Activity },
     { id: 'opt', label: 'Design optimization', icon: Boxes },
+    { id: 'logs', label: 'Logs', icon: ScrollText },
     { id: 'cite', label: 'Citations', icon: BookOpen },
   ];
 
   return (
-    <DesignCtx.Provider value={{ ...store, themeTick, openCite }}>
+    <DesignCtx.Provider value={{ ...store, themeTick, openCite, theme, setTheme }}>
       <style>{CSS}</style>
       <div className="ctr">
         <header className="ctr-hdr">
@@ -3984,6 +4815,7 @@ export default function CTRWorkbench() {
         </header>
         {tab === 'sim' && <SimulatorWorkspace />}
         {tab === 'opt' && <OptimizerWorkspace />}
+        {tab === 'logs' && <LogsPage />}
         {tab === 'cite' && (
           <CitationsPage focus={citeFocus}
             backLabel={tabs.find((t) => t.id === backTab)?.label}

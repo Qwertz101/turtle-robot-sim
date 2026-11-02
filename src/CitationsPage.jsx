@@ -67,6 +67,10 @@ const CSS = `
 .cz-eq .m .katex{font-size:1.1em;}
 .cz-eq .tag{font-family:KaTeX_Main,serif;color:var(--ink-600);flex-shrink:0;}
 .cz-note{margin:2px 0 0 42px;font-size:15px;}
+.cz-vars{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;align-items:baseline;margin:2px 0 10px 42px;padding:8px 12px;border-left:2px solid var(--k);font-size:13.5px;}
+.cz-vars .h{grid-column:1 / -1;font-size:11px;text-transform:uppercase;letter-spacing:.08em;opacity:.7;}
+.cz-vars .s{white-space:nowrap;text-align:right;}
+.cz-vars .d{opacity:.85;}
 .cz-meta{margin:6px 0 0 42px;display:flex;flex-wrap:wrap;gap:4px 18px;font-family:var(--font-body);
   font-size:12px;color:var(--ink-600);line-height:1.5;}
 .cz-meta b{font-weight:600;color:var(--ink-900);}
@@ -127,6 +131,17 @@ function Entry({ e, hit, value, jump }) {
         <div className="m" dangerouslySetInnerHTML={{ __html: html }} />
         <span className="tag">({EQ_NUM[e.id]})</span>
       </div>
+      {e.vars && (
+        <div className="cz-vars">
+          <div className="h">where</div>
+          {e.vars.map(([sym, d]) => (
+            <React.Fragment key={sym}>
+              <span className="s" dangerouslySetInnerHTML={{ __html: katex.renderToString(sym, { throwOnError: false }) }} />
+              <span className="d">{d}</span>
+            </React.Fragment>
+          ))}
+        </div>
+      )}
       <div className="cz-note">{e.note}</div>
       <div className="cz-meta">
         <span><b>Source</b>{' '}
